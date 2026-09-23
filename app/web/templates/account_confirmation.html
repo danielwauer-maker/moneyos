@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="intro"><div><h2>{{ account.name }}</h2><p>Datierten Saldo append-only bestätigen. Frühere Bestätigungen bleiben erhalten.</p></div><a class="secondary-button" href="/accounts">Zurück zu Konten</a></div>
+{% if error %}<div class="notice"><strong>Bestätigung nicht gespeichert:</strong> {{ error }}</div>{% endif %}
+{% if account.account_type == 'cash_vault' and account_view.current %}
+<div class="kpi-grid">
+  <article class="kpi"><span>Tresor Gesamt</span><strong>{{ account_view.current.balance|euro }}</strong></article>
+  <article class="kpi"><span>davon Umschläge</span><strong>{{ account_view.current.envelope_cash_total|euro if account_view.current.envelope_cash_total is not none else 'Nicht erfasst' }}</strong></article>
+  <article class="kpi"><span>freies Tresorgeld</span><strong>{{ free_vault_cash|euro if free_vault_cash is not none else 'Nicht abgestimmt' }}</strong></article>
+</div>
+{% if account_view.current.reconciliation_warning %}<div class="notice">Warnung: Die physisch gezählten Umschläge weichen vom MoneyOS-Umschlagstand ab. Es wurde nichts automatisch korrigiert.</div>{% endif %}
+{% endif %}
+<article class="panel">
+  <h3>{% if account.is_liability %}Offene Kartenverbindlichkeit bestätigen{% elif account.account_type == 'cash_wallet' %}Portemonnaie zählen{% elif account.account_type == 'cash_vault' %}Tresor zählen und abgleichen{% else %}Kontosaldo bestätigen{% endif %}</h3>
+  <form action="/accounts/{{ account.id }}/confirm" method="post" class="upload-form">
+    <label>Datum und Uhrzeit <input type="datetime-local" name="confirmed_at" required></label>
+    <label>{% if account.is_liability %}Offene Kartenverbindlichkeit (positiv eingeben){% elif account.account_type == 'cash_vault' %}Tresor Gesamt{% elif account.account_type == 'cash_wallet' %}Gezählter Bargeldbestand{% else %}Saldo{% endif %} <input type="text" inputmode="decimal" name="balance" placeholder="0,00" required></label>
+    {% if account.account_type == 'cash_vault' %}<label>Physisch in Umschlägen <input type="text" inputmode="decimal" name="envelope_cash_total" value="{{ calculated_envelope_total }}" required><small>MoneyOS berechnet aktuell {{ calculated_envelope_total|euro }}. Eine Abweichung erzeugt eine Warnung.</small></label>{% endif %}
+    {% if account.account_type in ['cash_wallet','cash_vault'] %}<input type="hidden" name="source_type" value="manual_count"><p>Quelle: Manuelle Zählung</p>{% else %}<label>Quelle <select name="source_type" required>{% for key, label in source_labels.items() %}{% if key != 'imported_balance' %}<option value="{{ key }}" {% if (account.is_liability and key == 'card_statement') or (account.account_type == 'paypal' and key == 'payment_provider') or (account.account_type == 'checking' and key == 'bank_statement') %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}</select></label>{% endif %}
+    <label>Status <select name="status" required>{% for key, label in status_labels.items() %}<option value="{{ key }}" {% if key == 'confirmed' %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+    <label>Quellreferenz (optional) <input type="text" name="source_reference" maxlength="255"></label>
+    <label>Notiz (optional) <input type="text" name="notes"></label>
+    <button class="primary-button" type="submit">Saldo bestätigen</button>
+  </form>
+</article>
+<div class="section-head"><div><h2>Bestätigungshistorie</h2><p>Append-only; neuere bestätigte Einträge bestimmen die aktuelle Sicht.</p></div></div>
+<article class="panel table-panel"><table><thead><tr><th>Datum</th><th>Saldo</th><th>Quelle</th><th>Status</th><th>Hinweis</th></tr></thead><tbody>
+{% for item in history %}<tr><td>{{ item.confirmed_at.strftime('%d.%m.%Y %H:%M') }}</td><td>{% if account.is_liability %}{{ (-item.balance)|euro }} Verbindlichkeit{% else %}{{ item.balance|euro }}{% endif %}</td><td>{{ source_labels[item.source_type] }}</td><td>{{ status_labels[item.status] }}</td><td>{% if item.reconciliation_warning %}Umschlagabweichung{% else %}{{ item.notes or '—' }}{% endif %}</td></tr>{% else %}<tr><td colspan="5">Noch keine Saldo-Bestätigung vorhanden.</td></tr>{% endfor %}
+</tbody></table></article>
+{% endblock %}

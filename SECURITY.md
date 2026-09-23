@@ -20,6 +20,10 @@ dem Backfill automatisch ein Safety-Backup. Sie ändert keine Raw Records oder
 Source Transactions. Konto-, Salden- und Beitragswerte liegen in
 `data/private/profiles/private/master_data.json`; das gesamte `data/`-Verzeichnis
 ist ignoriert, sodass diese Werte nicht in Git gelangen.
+Saldo-Bestätigungen werden ausschließlich im privaten SQLite-Profil gespeichert.
+Formulare akzeptieren Decimal-Text, führen keine Rohdaten in Logs und sind im
+Demo-Profil auf HTTP-Ebene gesperrt. Der Sparda-Historienbackfill liest nur den
+bereits importierten Saldo und ändert keine Raw Records oder Source Transactions.
 
 ## Aktuelle Verschlüsselungsgrenze
 

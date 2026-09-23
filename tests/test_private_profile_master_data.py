@@ -25,6 +25,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.main import app
+from app.services.balance_confirmations import backfill_sparda_imported_balance
 from app.services.dashboard import build_dashboard
 from app.services.private_profile import initialize_private_profile
 from app.services.reviews import build_review_view
@@ -297,6 +298,7 @@ def test_sparda_backfill_links_accounts_without_mutating_source_rows(
 
     with factory.begin() as db:
         result = initialize_private_profile(db, settings)
+        assert backfill_sparda_imported_balance(db, settings)
 
     assert result.source_links_created == 4
     assert result.events_backfilled == 3

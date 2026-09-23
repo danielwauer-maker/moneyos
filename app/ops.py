@@ -7,6 +7,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.db.session import SessionLocal
 from app.services.backup import create_backup, restore_backup
+from app.services.balance_confirmations import backfill_sparda_imported_balance
 from app.services.diagnostics import diagnostics_as_dicts
 from app.services.import_staging import delete_staged_file
 from app.services.private_profile import initialize_private_profile
@@ -26,6 +27,10 @@ def build_parser() -> argparse.ArgumentParser:
         "init-private", help="Initialize private accounts/envelopes and backfill Sparda links"
     )
     initialize.add_argument("--confirm", action="store_true")
+    balance_history = commands.add_parser(
+        "init-balance-history", help="Backfill the imported Sparda balance confirmation"
+    )
+    balance_history.add_argument("--confirm", action="store_true")
     retention = commands.add_parser("retention", help="Plan or apply configured retention")
     retention.add_argument("--apply", action="store_true")
     retention.add_argument("--confirm", action="store_true")
@@ -67,6 +72,20 @@ def main() -> None:
             result = initialize_private_profile(db, settings)
         print(f"safety_backup={backup}")
         print(json.dumps(result.__dict__, indent=2))
+    elif args.command == "init-balance-history":
+        if settings.demo_mode:
+            raise ValueError("init-balance-history requires MONEYOS_DEMO_MODE=false")
+        if not args.confirm:
+            raise ValueError("init-balance-history requires --confirm")
+        backup = create_backup(
+            settings.active_database_url,
+            settings.active_backup_dir,
+            backup_type="safety",
+        )
+        with SessionLocal.begin() as db:
+            created = backfill_sparda_imported_balance(db, settings)
+        print(f"safety_backup={backup}")
+        print(f"sparda_confirmation_created={created}")
     elif args.command == "retention":
         candidates = plan_retention(settings)
         if args.apply:

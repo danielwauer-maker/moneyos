@@ -7,6 +7,8 @@ historische Regeln haben Gültigkeitszeiträume; Geld nutzt Decimal/NUMERIC.
 Kernbereiche:
 
 - `accounts`: eigene Aktiv- und Passivkonten; Amazon ist kein Konto.
+- `balance_confirmations`: append-only Historie datierter Saldo-Bestätigungen;
+  die neueste Zeile mit Status `confirmed` bestimmt die aktuelle Sicht.
 - `import_batches`, `raw_import_records`, `source_transactions`: Importkette.
 - `source_transaction_accounts`: additive Konto-/Rollenverknüpfung für
   unveränderliche Quelltransaktionen; `source` und optional `target` werden ohne
@@ -38,5 +40,8 @@ Alembic versioniert.
 - Transfers führen, soweit bekannt, `source_account_id` und `target_account_id`;
   ihr positiver Betrag ist die transferierte Größe, die Richtung folgt aus den
   Kontorollen.
+- Tresor-Bestätigungen speichern Gesamtbestand, physisch gezählten Umschlaganteil,
+  den zu diesem Zeitpunkt berechneten MoneyOS-Umschlagstand und einen möglichen
+  Abgleichhinweis. Umschläge werden dem Vermögen nicht zusätzlich zugerechnet.
 - Ereignistypen, Confidence/Probability und nichtnegative Ziel-/Bestandswerte
   werden durch Datenbank-Constraints geschützt.

@@ -5,7 +5,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
-    Account,
     EconomicEvent,
     Envelope,
     EnvelopeMovement,
@@ -15,15 +14,16 @@ from app.db.models import (
 from app.domain.accounting import WealthInputs, total_wealth
 from app.domain.envelopes import physical_balance
 from app.domain.reconciliation import reconcile_envelopes
+from app.services.balance_confirmations import account_balance_views, vault_free_cash
 
 
 def build_dashboard(session: Session) -> dict[str, object]:
-    accounts = list(session.scalars(select(Account).where(Account.is_active).order_by(Account.id)))
-    by_type = {account.account_type: account for account in accounts}
+    account_rows = account_balance_views(session, include_inactive=False)
+    by_type = {row.account.account_type: row for row in account_rows}
 
     def confirmed_balance(account_type: str) -> Decimal:
-        account = by_type.get(account_type)
-        return account.balance if account and account.balance_confirmed else Decimal()
+        row = by_type.get(account_type)
+        return row.current.balance if row and row.current else Decimal()
 
     wealth = total_wealth(
         WealthInputs(
@@ -72,8 +72,14 @@ def build_dashboard(session: Session) -> dict[str, object]:
         )
     reserved = sum((row["actual"] for row in envelope_rows), Decimal())
     vault = by_type.get("cash_vault")
-    vault_balance_confirmed = bool(vault and vault.balance_confirmed)
-    free_vault = max(confirmed_balance("cash_vault") - reserved, Decimal())
+    vault_balance_confirmed = bool(vault and vault.current)
+    confirmed_free_vault = vault_free_cash(vault.current) if vault else None
+    free_vault = max(
+        confirmed_free_vault
+        if confirmed_free_vault is not None
+        else confirmed_balance("cash_vault") - reserved,
+        Decimal(),
+    )
     reconciliation = reconcile_envelopes([row["delta"] for row in envelope_rows], free_vault)
     month_start = date.today().replace(day=1)
     income = session.scalar(
@@ -113,18 +119,19 @@ def build_dashboard(session: Session) -> dict[str, object]:
         )
     )
     return {
-        "accounts": accounts,
+        "accounts": account_rows,
         "wealth": wealth,
-        "wealth_has_unknown": any(not account.balance_confirmed for account in accounts),
+        "wealth_has_unknown": any(row.current is None for row in account_rows),
+        "unreconciled_active_count": sum(row.current is None for row in account_rows),
         "reserved": reserved,
         "free_available": (
-            by_type["checking"].balance - expenses
-            if by_type.get("checking") and by_type["checking"].balance_confirmed
+            by_type["checking"].current.balance - expenses
+            if by_type.get("checking") and by_type["checking"].current
             else None
         ),
         "card_liabilities": (
-            abs(by_type["credit_card"].balance)
-            if by_type.get("credit_card") and by_type["credit_card"].balance_confirmed
+            abs(by_type["credit_card"].current.balance)
+            if by_type.get("credit_card") and by_type["credit_card"].current
             else None
         ),
         "income": income,

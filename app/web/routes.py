@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -18,6 +19,17 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.importers.sparda import SpardaFormatError, import_sparda_batch, preview_sparda_file
+from app.services.balance_confirmations import (
+    SOURCE_LABELS,
+    STATUS_LABELS,
+    account_balance_view,
+    account_balance_views,
+    calculate_envelope_cash_total,
+    confirmation_history,
+    create_balance_confirmation,
+    parse_money,
+    vault_free_cash,
+)
 from app.services.dashboard import build_dashboard
 from app.services.diagnostics import run_diagnostics
 from app.services.import_staging import batch_file_path, stage_upload
@@ -82,8 +94,97 @@ def envelopes(request: Request, db: DbSession) -> HTMLResponse:
 
 @router.get("/accounts", response_class=HTMLResponse)
 def accounts(request: Request, db: DbSession) -> HTMLResponse:
-    rows = list(db.scalars(select(Account).order_by(Account.id)))
-    return render(request, "accounts.html", active="accounts", page_title="Konten", accounts=rows)
+    return render(
+        request,
+        "accounts.html",
+        active="accounts",
+        page_title="Konten",
+        accounts=account_balance_views(db),
+        source_labels=SOURCE_LABELS,
+        status_labels=STATUS_LABELS,
+    )
+
+
+def _confirmation_context(account: Account, db: Session) -> dict[str, object]:
+    view = account_balance_view(db, account)
+    return {
+        "account": account,
+        "account_view": view,
+        "history": confirmation_history(db, account.id),
+        "source_labels": SOURCE_LABELS,
+        "status_labels": STATUS_LABELS,
+        "calculated_envelope_total": (
+            calculate_envelope_cash_total(db) if account.account_type == "cash_vault" else None
+        ),
+        "free_vault_cash": vault_free_cash(view.current),
+    }
+
+
+@router.get("/accounts/{account_id}/confirm", response_class=HTMLResponse)
+def confirm_account_balance(request: Request, account_id: int, db: DbSession) -> HTMLResponse:
+    if get_settings().demo_mode:
+        raise HTTPException(status_code=409, detail="Saldo-Bestätigungen sind privatprofilgebunden")
+    account = db.get(Account, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return render(
+        request,
+        "account_confirmation.html",
+        active="accounts",
+        page_title="Saldo bestätigen",
+        **_confirmation_context(account, db),
+    )
+
+
+@router.post("/accounts/{account_id}/confirm")
+def save_account_balance(
+    request: Request,
+    account_id: int,
+    db: DbSession,
+    confirmed_at: Annotated[str, Form()],
+    balance: Annotated[str, Form()],
+    source_type: Annotated[str, Form()],
+    status: Annotated[str, Form()],
+    source_reference: Annotated[str | None, Form()] = None,
+    notes: Annotated[str | None, Form()] = None,
+    envelope_cash_total: Annotated[str | None, Form()] = None,
+) -> HTMLResponse:
+    if get_settings().demo_mode:
+        raise HTTPException(status_code=409, detail="Saldo-Bestätigungen sind privatprofilgebunden")
+    account = db.get(Account, account_id)
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    try:
+        timestamp = datetime.fromisoformat(confirmed_at)
+        entered = parse_money(balance)
+        envelope_total = parse_money(envelope_cash_total) if envelope_cash_total else None
+        if account.account_type in {"cash_wallet", "cash_vault"}:
+            source_type = "manual_count"
+        create_balance_confirmation(
+            db,
+            account=account,
+            confirmed_at=timestamp,
+            entered_balance=entered,
+            source_type=source_type,
+            status=status,
+            source_reference=source_reference,
+            notes=notes,
+            envelope_cash_total=envelope_total,
+        )
+        db.commit()
+    except (ValueError, OverflowError) as exc:
+        db.rollback()
+        response = render(
+            request,
+            "account_confirmation.html",
+            active="accounts",
+            page_title="Saldo bestätigen",
+            error=str(exc),
+            **_confirmation_context(account, db),
+        )
+        response.status_code = 422
+        return response
+    return RedirectResponse(f"/accounts/{account_id}/confirm", status_code=303)
 
 
 @router.get("/planning", response_class=HTMLResponse)

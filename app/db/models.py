@@ -57,6 +57,53 @@ class Account(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    balance_confirmations: Mapped[list[BalanceConfirmation]] = relationship(
+        back_populates="account"
+    )
+
+
+class BalanceConfirmation(Base):
+    __tablename__ = "balance_confirmations"
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('manual_count','bank_statement','imported_balance',"
+            "'card_statement','payment_provider')",
+            name="ck_balance_confirmation_source_type",
+        ),
+        CheckConstraint(
+            "status IN ('confirmed','provisional','unreconciled')",
+            name="ck_balance_confirmation_status",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
+            name="ck_balance_confirmation_confidence",
+        ),
+        CheckConstraint(
+            "envelope_cash_total IS NULL OR envelope_cash_total >= 0",
+            name="ck_balance_confirmation_envelope_cash",
+        ),
+        CheckConstraint(
+            "calculated_envelope_total IS NULL OR calculated_envelope_total >= 0",
+            name="ck_balance_confirmation_calculated_envelope",
+        ),
+        Index("ix_balance_confirmations_account_date", "account_id", "confirmed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime)
+    balance: Mapped[Decimal] = mapped_column(MONEY)
+    currency: Mapped[str] = mapped_column(String(3), default="EUR")
+    source_type: Mapped[str] = mapped_column(String(30))
+    source_reference: Mapped[str | None] = mapped_column(String(255))
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    status: Mapped[str] = mapped_column(String(20))
+    notes: Mapped[str | None] = mapped_column(Text)
+    envelope_cash_total: Mapped[Decimal | None] = mapped_column(MONEY)
+    calculated_envelope_total: Mapped[Decimal | None] = mapped_column(MONEY)
+    reconciliation_warning: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    account: Mapped[Account] = relationship(back_populates="balance_confirmations")
 
 
 class ImportBatch(Base):
@@ -439,7 +486,12 @@ def _validate_rule_period(_mapper: object, connection: object, target: EnvelopeR
         raise ValueError("Envelope rule periods must not overlap")
 
 
-for _immutable_model in (RawImportRecord, SourceTransaction, EnvelopeRulePeriod):
+for _immutable_model in (
+    RawImportRecord,
+    SourceTransaction,
+    EnvelopeRulePeriod,
+    BalanceConfirmation,
+):
     event.listen(_immutable_model, "before_update", _reject_mutation)
     event.listen(_immutable_model, "before_delete", _reject_mutation)
 

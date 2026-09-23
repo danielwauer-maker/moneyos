@@ -49,6 +49,14 @@ Private Namen, Salden und Beitragsbeträge liest der Service aus der ignorierten
 Datei `data/private/profiles/private/master_data.json`; sie sind keine
 Quellcode-Konstanten und werden nicht mit Git versioniert.
 
+`balance_confirmations` ist die revisionssichere Saldoquelle. Neue Bestätigungen
+werden angehängt; Updates und Deletes verhindern ORM-Hooks und SQLite-Trigger.
+Dashboard und Kontenseite verwenden ausschließlich die neueste bestätigte Zeile.
+Vorläufige, nicht abgestimmte und fehlende Salden werden nicht als Nullwert in das
+Vermögen gerechnet. `init-balance-history --confirm` übernimmt einmalig den
+bereits importierten Sparda-Buchungssaldo samt Datum in diese Historie und erzeugt
+vorher automatisch ein Safety-Backup.
+
 `app/services/import_staging.py` übernimmt Streaming, SHA-256, unveränderte lokale
 Ablage, Dateityp-/Inhaltsprüfung und Quarantäne. Erst ein Batch im Zustand `valid`
 darf an `app/services/import_execution.py` übergeben werden. Der spätere Parser-

@@ -2,7 +2,7 @@
 {% block content %}
 <div class="intro"><div><h2>Guten Morgen</h2><p>Hier ist dein finanzieller Überblick für heute.</p></div><span class="date-pill">Stand: heute</span></div>
 <div class="kpi-grid">
-  <article class="kpi featured"><span>Gesamtvermögen</span><strong>{{ wealth|euro }}</strong><small>{% if wealth_has_unknown %}Teilstand; unbestätigte Konten ausgenommen{% else %}Umschläge im Tresor nur einmal gezählt{% endif %}</small></article>
+  <article class="kpi featured"><span>Gesamtvermögen{% if wealth_has_unknown %} teilweise{% endif %}</span><strong>{{ wealth|euro }}</strong><small>{% if wealth_has_unknown %}{{ unreconciled_active_count }} Konten noch nicht abgestimmt{% else %}Umschläge im Tresor nur einmal gezählt{% endif %}</small></article>
   <article class="kpi"><span>Frei verfügbar</span><strong>{{ free_available|euro if free_available is not none else 'Nicht abgestimmt' }}</strong><small>Liquidität nach Monatsausgaben</small></article>
   <article class="kpi"><span>Umschläge / reserviert</span><strong>{{ reserved|euro }}</strong><small>Physisch im Tresor enthalten</small></article>
   <article class="kpi negative"><span>Kartenverbindlichkeiten</span><strong>{{ card_liabilities|euro if card_liabilities is not none else 'Nicht abgestimmt' }}</strong><small>Kreditkartenkonto</small></article>
@@ -13,10 +13,10 @@
 
 <div class="section-head"><div><h2>Konten</h2><p>Aktuelle Salden deiner eigenen Konten.</p></div><a href="/accounts">Alle Konten →</a></div>
 <div class="account-grid">
-{% for account in accounts %}
+{% for row in accounts %}{% set account = row.account %}
   <article class="account-card {% if account.is_liability %}liability{% endif %}">
     <div class="account-top"><span class="account-symbol">{{ account.name[0] }}</span><span class="badge {% if account.is_active %}success{% endif %}">{{ 'Aktiv' if account.is_active else 'Inaktiv' }}</span></div>
-    <p>{{ account.name }}</p><strong>{{ account.balance|euro if account.balance_confirmed else 'Nicht abgestimmt' }}</strong><small>{{ account.account_type|replace('_',' ')|title }}</small>
+    <p>{{ account.name }}</p><strong>{{ row.display_balance|euro if row.current else 'Nicht abgestimmt' }}</strong><small>{{ account.account_type|replace('_',' ')|title }}</small>
   </article>
 {% endfor %}
 </div>

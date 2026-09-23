@@ -132,3 +132,19 @@ $env:MONEYOS_PRIVATE_DATABASE_URL = "sqlite:///./data/private/profiles/private/m
 Der letzte Befehl legt vor Änderungen automatisch ein privates Safety-Backup an.
 Unbestätigte Salden von Amex, PayPal, Portemonnaie, Tresor und C24 bleiben sichtbar
 als „Nicht abgestimmt“ und werden nicht als 0 Euro erfunden.
+
+Nach Migration `0006` wird der bestehende importierte Sparda-Saldo einmalig in
+die append-only Bestätigungshistorie übernommen:
+
+```powershell
+$env:MONEYOS_DEMO_MODE = "false"
+$env:MONEYOS_PRIVATE_DATABASE_URL = "sqlite:///./data/private/profiles/private/moneyos.db"
+.\.venv\Scripts\alembic.exe upgrade head
+.\.venv\Scripts\python.exe -m app.ops init-balance-history --confirm
+```
+
+Jeder Lauf legt zuerst ein Safety-Backup an; der Backfill selbst ist idempotent.
+Weitere Salden werden auf `Konten` über `Saldo bestätigen` datiert erfasst.
+Portemonnaie und Tresor verwenden manuelle Zählungen. Beim Tresor werden
+Gesamtbestand und Umschlaganteil getrennt festgehalten; Abweichungen zum
+berechneten Umschlagstand erzeugen eine Warnung statt einer stillen Korrektur.

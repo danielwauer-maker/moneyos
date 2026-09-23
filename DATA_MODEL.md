@@ -45,3 +45,10 @@ Alembic versioniert.
   Abgleichhinweis. Umschläge werden dem Vermögen nicht zusätzlich zugerechnet.
 - Ereignistypen, Confidence/Probability und nichtnegative Ziel-/Bestandswerte
   werden durch Datenbank-Constraints geschützt.
+- Umschlag-Sollwerte sind eine datierte Berechnungssicht, kein überschreibbarer
+  Snapshot: Basis + gültige Monatszuführungen − bestätigte, explizit zugeordnete
+  Ausgaben + rückverfolgbare Refunds. Der ungerundete Rechnungswert, der physische
+  5-Euro-Zielwert, Rundungsrest und Defizit bleiben getrennt.
+- Ein Economic Event mit Umschlagzuordnung erzeugt eine Forderung gegen den Umschlag,
+  aber keine physische Bewegung. Der gezählte Ist-Bestand ändert sich erst durch
+  einen neuen bestätigten Snapshot oder eine ausdrückliche `envelope_movement`.

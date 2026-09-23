@@ -148,3 +148,11 @@ Weitere Salden werden auf `Konten` über `Saldo bestätigen` datiert erfasst.
 Portemonnaie und Tresor verwenden manuelle Zählungen. Beim Tresor werden
 Gesamtbestand und Umschlaganteil getrennt festgehalten; Abweichungen zum
 berechneten Umschlagstand erzeugen eine Warnung statt einer stillen Korrektur.
+
+Die Seite **Umschläge** berechnet das aktuelle Soll aus dem bestätigten Basisstand,
+den historischen Beitragszeiträumen und explizit zugeordneten Economic Events.
+Unzugeordnete Ausgaben und offene Reviews werden nicht geraten: Der Abgleich bleibt
+sichtbar „vorläufig“, bis die Zuordnung bestätigt ist. Das rechnerische Soll wird
+erst danach auf volle 5 Euro abgerundet; Rundungsrest und ein möglicher Fehlbetrag
+werden separat ausgewiesen. Diese Ansicht schreibt weder Ist-Snapshots noch
+Umschlagbewegungen in die Datenbank.

@@ -6,15 +6,12 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
     EconomicEvent,
-    Envelope,
-    EnvelopeMovement,
     RecurringItem,
     ReviewItem,
 )
 from app.domain.accounting import WealthInputs, total_wealth
-from app.domain.envelopes import physical_balance
-from app.domain.reconciliation import reconcile_envelopes
 from app.services.balance_confirmations import account_balance_views, vault_free_cash
+from app.services.envelope_targets import calculate_envelope_targets
 
 
 def build_dashboard(session: Session) -> dict[str, object]:
@@ -34,53 +31,17 @@ def build_dashboard(session: Session) -> dict[str, object]:
             credit_card_liabilities=(abs(confirmed_balance("credit_card"))),
         )
     )
-    envelopes = list(
-        session.scalars(
-            select(Envelope).options(selectinload(Envelope.snapshots)).order_by(Envelope.sort_order)
-        )
-    )
-    envelope_rows = []
-    for envelope in envelopes:
-        snapshot = max(envelope.snapshots, key=lambda row: row.snapshot_date)
-        movements = list(
-            session.scalars(
-                select(EnvelopeMovement).where(
-                    EnvelopeMovement.envelope_id == envelope.id,
-                    EnvelopeMovement.occurred_at > snapshot.snapshot_date,
-                )
-            )
-        )
-        calculated = snapshot.physical_balance
-        for movement in movements:
-            direction = -1 if movement.movement_type in {"expense", "transfer_out"} else 1
-            calculated += direction * movement.amount
-        target_info = physical_balance(calculated)
-        if envelope.target_rule_type == "target_balance" and envelope.target_amount is not None:
-            actual = target_info.physical
-            target = physical_balance(envelope.target_amount).physical
-        else:
-            actual = snapshot.physical_balance
-            target = target_info.physical
-        envelope_rows.append(
-            {
-                "envelope": envelope,
-                "actual": actual,
-                "target": target,
-                "delta": target - actual,
-                "deficit": target_info.deficit,
-            }
-        )
-    reserved = sum((row["actual"] for row in envelope_rows), Decimal())
     vault = by_type.get("cash_vault")
     vault_balance_confirmed = bool(vault and vault.current)
     confirmed_free_vault = vault_free_cash(vault.current) if vault else None
-    free_vault = max(
-        confirmed_free_vault
-        if confirmed_free_vault is not None
-        else confirmed_balance("cash_vault") - reserved,
-        Decimal(),
+    free_vault = max(confirmed_free_vault or Decimal(), Decimal())
+    envelope_targets = calculate_envelope_targets(
+        session,
+        calculation_date=date.today(),
+        free_vault_cash=free_vault,
     )
-    reconciliation = reconcile_envelopes([row["delta"] for row in envelope_rows], free_vault)
+    envelope_rows = envelope_targets.rows
+    reserved = sum((row.actual for row in envelope_rows), Decimal())
     month_start = date.today().replace(day=1)
     income = session.scalar(
         select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
@@ -141,7 +102,8 @@ def build_dashboard(session: Session) -> dict[str, object]:
         "envelopes": envelope_rows,
         "free_vault": free_vault,
         "vault_balance_confirmed": vault_balance_confirmed,
-        "reconciliation": reconciliation,
+        "reconciliation": envelope_targets.reconciliation,
+        "envelope_targets": envelope_targets,
         "recent_events": recent_events,
         "recurring": recurring,
     }

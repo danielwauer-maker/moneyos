@@ -57,6 +57,15 @@ Vermögen gerechnet. `init-balance-history --confirm` übernimmt einmalig den
 bereits importierten Sparda-Buchungssaldo samt Datum in diese Historie und erzeugt
 vorher automatisch ein Safety-Backup.
 
+`app/services/envelope_targets.py` erzeugt den Umschlag-Abgleich als reproduzierbare,
+nicht persistierte Sicht. Er verwendet den bestätigten historischen Basis-Snapshot,
+die zum jeweiligen Kalendermonat gültige Beitragsregel und ausschließlich bestätigte,
+explizit zugeordnete Economic Events. Economic Events verändern den physischen
+Ist-Bestand nicht; dafür zählen nur bestätigte Snapshots und physische
+`envelope_movements`. Offene Reviews und unzugeordnete Ausgaben oder Refunds werden
+nicht geschätzt, sondern markieren betroffene Sollwerte als vorläufig. Damit werden
+weder historische Bestätigungen noch private Rohdaten beim Aufruf der Seite verändert.
+
 `app/services/import_staging.py` übernimmt Streaming, SHA-256, unveränderte lokale
 Ablage, Dateityp-/Inhaltsprüfung und Quarantäne. Erst ein Batch im Zustand `valid`
 darf an `app/services/import_execution.py` übergeben werden. Der spätere Parser-

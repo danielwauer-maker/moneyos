@@ -156,3 +156,11 @@ sichtbar „vorläufig“, bis die Zuordnung bestätigt ist. Das rechnerische So
 erst danach auf volle 5 Euro abgerundet; Rundungsrest und ein möglicher Fehlbetrag
 werden separat ausgewiesen. Diese Ansicht schreibt weder Ist-Snapshots noch
 Umschlagbewegungen in die Datenbank.
+
+Der Arbeitsbereich **Umschlag-Zuordnung** bündelt die relevanten Vorgänge seit dem
+bestätigten Basisstand. Einzel- und Mehrfachauswahl können einem physischen Umschlag
+zugeordnet, final als „Kein Umschlag“ markiert oder zurückgestellt werden. Filter
+für Monat, Zahlungspartner, Kategorie, Konto und Entscheidungsstatus sowie
+Gruppierungen nach Zahlungspartner, Kategorie, Monat und Betrag unterstützen den
+schnellen Abgleich. Aus konsistenten Mehrfachauswahlen können priorisierte Regeln
+entstehen; diese liefern ausschließlich Vorschläge und ordnen niemals still zu.

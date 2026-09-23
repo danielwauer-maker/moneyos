@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.db.models import (
     EconomicEvent,
     Envelope,
+    EnvelopeAssignmentDecision,
     EnvelopeMovement,
     EnvelopeSnapshot,
     EventSourceLink,
@@ -128,9 +129,9 @@ def _physical_actual(
     return actual
 
 
-def _source_token(event_id: int, links: list[EventSourceLink]) -> tuple[str, int]:
+def _source_token(event_id: int, links: list[EventSourceLink]) -> str:
     canonical = next((link for link in links if link.link_type == "canonical_source"), None)
-    return ("source", canonical.source_transaction_id) if canonical else ("event", event_id)
+    return f"source:{canonical.source_transaction_id}" if canonical else f"event:{event_id}"
 
 
 def calculate_envelope_targets(
@@ -232,10 +233,27 @@ def calculate_envelope_targets(
             )
         )
     )
+    event_keys = {
+        event.id: _source_token(event.id, links_by_event.get(event.id, [])) for event in events
+    }
+    assignment_decisions = {
+        decision.candidate_key: decision
+        for decision in db.scalars(
+            select(EnvelopeAssignmentDecision).where(
+                EnvelopeAssignmentDecision.candidate_key.in_(event_keys.values())
+            )
+        )
+    }
 
     resolved_envelope_by_event: dict[int, int] = {}
     for event in events:
         if event.id in open_review_event_ids:
+            continue
+        decision = assignment_decisions.get(event_keys[event.id])
+        if decision and decision.decision == "assigned" and decision.envelope_id is not None:
+            resolved_envelope_by_event[event.id] = decision.envelope_id
+            continue
+        if decision and decision.decision == "no_envelope":
             continue
         if event.envelope_id is not None:
             resolved_envelope_by_event[event.id] = event.envelope_id
@@ -251,7 +269,7 @@ def calculate_envelope_targets(
                 resolved_envelope_by_event[event.id] = original.envelope_id
                 break
 
-    unresolved: dict[tuple[str, int], set[int] | None] = {}
+    unresolved: dict[str, set[int] | None] = {}
     for event in events:
         if event.id in resolved_envelope_by_event:
             continue
@@ -272,7 +290,7 @@ def calculate_envelope_targets(
         )
     ).all()
     for review, source in review_rows:
-        token = ("source", source.id)
+        token = f"source:{source.id}"
         proposed = (
             {review.proposed_envelope_id} if review.proposed_envelope_id is not None else None
         )
@@ -281,6 +299,18 @@ def calculate_envelope_targets(
             unresolved[token] = proposed
         else:
             unresolved[token] = existing | proposed
+
+    if unresolved:
+        final_keys = set(
+            db.scalars(
+                select(EnvelopeAssignmentDecision.candidate_key).where(
+                    EnvelopeAssignmentDecision.candidate_key.in_(unresolved),
+                    EnvelopeAssignmentDecision.decision == "no_envelope",
+                )
+            )
+        )
+        for key in final_keys:
+            unresolved.pop(key, None)
 
     rows: list[EnvelopeTargetRow] = []
     all_included_ids: set[int] = set()

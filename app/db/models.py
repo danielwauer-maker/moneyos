@@ -419,6 +419,41 @@ class AssignmentRule(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
+class EnvelopeAssignmentDecision(Base):
+    __tablename__ = "envelope_assignment_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('assigned','no_envelope','later')",
+            name="ck_envelope_assignment_decision",
+        ),
+        CheckConstraint(
+            "(decision = 'assigned' AND envelope_id IS NOT NULL) OR "
+            "(decision != 'assigned' AND envelope_id IS NULL)",
+            name="ck_envelope_assignment_target",
+        ),
+        CheckConstraint(
+            "source_transaction_id IS NOT NULL OR economic_event_id IS NOT NULL",
+            name="ck_envelope_assignment_source",
+        ),
+        Index("ix_envelope_assignment_decisions_state", "decision"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_key: Mapped[str] = mapped_column(String(80), unique=True)
+    source_transaction_id: Mapped[int | None] = mapped_column(ForeignKey("source_transactions.id"))
+    economic_event_id: Mapped[int | None] = mapped_column(ForeignKey("economic_events.id"))
+    decision: Mapped[str] = mapped_column(String(20))
+    envelope_id: Mapped[int | None] = mapped_column(ForeignKey("envelopes.id"))
+    assignment_rule_id: Mapped[int | None] = mapped_column(ForeignKey("assignment_rules.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    source_transaction: Mapped[SourceTransaction | None] = relationship()
+    economic_event: Mapped[EconomicEvent | None] = relationship()
+    envelope: Mapped[Envelope | None] = relationship()
+    assignment_rule: Mapped[AssignmentRule | None] = relationship()
+
+
 class ReconciliationRun(Base):
     __tablename__ = "reconciliation_runs"
 

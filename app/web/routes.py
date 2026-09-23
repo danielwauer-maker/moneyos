@@ -32,6 +32,12 @@ from app.services.balance_confirmations import (
 )
 from app.services.dashboard import build_dashboard
 from app.services.diagnostics import run_diagnostics
+from app.services.envelope_assignments import (
+    apply_assignment_decisions,
+    build_assignment_workspace,
+    rule_condition_label,
+    update_envelope_rule,
+)
 from app.services.import_staging import batch_file_path, stage_upload
 from app.services.reviews import build_review_view
 from app.web.templating import templates
@@ -89,7 +95,123 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
 @router.get("/envelopes", response_class=HTMLResponse)
 def envelopes(request: Request, db: DbSession) -> HTMLResponse:
     data = build_dashboard(db)
+    data["assignment_progress"] = build_assignment_workspace(db).progress
     return render(request, "envelopes.html", active="envelopes", page_title="Umschläge", **data)
+
+
+@router.get("/envelope-assignments", response_class=HTMLResponse)
+def envelope_assignments(request: Request, db: DbSession) -> HTMLResponse:
+    params = request.query_params
+    try:
+        category_id = int(params["category"]) if params.get("category") else None
+        account_id = int(params["account"]) if params.get("account") else None
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Invalid assignment filter") from exc
+    workspace = build_assignment_workspace(
+        db,
+        month=params.get("month"),
+        merchant=params.get("merchant"),
+        category_id=category_id,
+        account_id=account_id,
+        state=params.get("state", "unresolved"),
+        group_by=params.get("group_by", "priority"),
+    )
+    query = str(request.url.query)
+    return_to = request.url.path + (f"?{query}" if query else "") + "#workspace"
+    rule_rows = [
+        {
+            "rule": rule,
+            "condition": rule_condition_label(rule, db),
+            "envelope_id": (rule.action_json or {}).get("envelope_id"),
+        }
+        for rule in workspace.rules
+    ]
+    return render(
+        request,
+        "envelope_assignments.html",
+        active="envelope_assignment",
+        page_title="Umschlag-Zuordnung",
+        workspace=workspace,
+        filters=params,
+        return_to=return_to,
+        rule_rows=rule_rows,
+        error=params.get("error"),
+    )
+
+
+def _assignment_redirect(return_to: str | None, error: str | None = None) -> str:
+    from urllib.parse import quote
+
+    target = (
+        return_to
+        if return_to and return_to.startswith("/envelope-assignments")
+        else "/envelope-assignments"
+    )
+    if error:
+        separator = "&" if "?" in target else "?"
+        fragment = ""
+        if "#" in target:
+            target, fragment = target.split("#", 1)
+            fragment = f"#{fragment}"
+        target = f"{target}{separator}error={quote(error)}{fragment}"
+    return target
+
+
+@router.post("/envelope-assignments/decide")
+def decide_envelope_assignments(
+    request: Request,
+    db: DbSession,
+    candidate_keys: Annotated[list[str], Form()],
+    decision: Annotated[str, Form()],
+    envelope_id: Annotated[int | None, Form()] = None,
+    create_rule: Annotated[bool, Form()] = False,
+    rule_basis: Annotated[str, Form()] = "auto",
+    return_to: Annotated[str | None, Form()] = None,
+) -> RedirectResponse:
+    if get_settings().demo_mode:
+        raise HTTPException(
+            status_code=409, detail="Umschlag-Zuordnungen sind privatprofilgebunden"
+        )
+    try:
+        apply_assignment_decisions(
+            db,
+            keys=candidate_keys,
+            decision=decision,
+            envelope_id=envelope_id,
+            create_rule=create_rule or request.query_params.get("create_rule") == "true",
+            rule_basis=rule_basis,
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(_assignment_redirect(return_to, str(exc)), status_code=303)
+    return RedirectResponse(_assignment_redirect(return_to), status_code=303)
+
+
+@router.post("/envelope-assignments/rules/{rule_id}")
+def edit_envelope_rule(
+    rule_id: int,
+    db: DbSession,
+    priority: Annotated[int, Form()],
+    envelope_id: Annotated[int, Form()],
+    enabled: Annotated[bool, Form()] = False,
+    return_to: Annotated[str | None, Form()] = None,
+) -> RedirectResponse:
+    if get_settings().demo_mode:
+        raise HTTPException(status_code=409, detail="Umschlag-Regeln sind privatprofilgebunden")
+    try:
+        update_envelope_rule(
+            db,
+            rule_id=rule_id,
+            priority=priority,
+            enabled=enabled,
+            envelope_id=envelope_id,
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(_assignment_redirect(return_to, str(exc)), status_code=303)
+    return RedirectResponse(_assignment_redirect(return_to), status_code=303)
 
 
 @router.get("/accounts", response_class=HTMLResponse)

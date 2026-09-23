@@ -20,6 +20,8 @@ Kernbereiche:
   `envelope_movements`: physische Umschläge, Historie und Bewegungen.
 - `projects`: unabhängige Tags/Projekte.
 - `review_items`, `assignment_rules`: nachvollziehbare Entscheidungen.
+- `envelope_assignment_decisions`: eindeutige Entscheidung je Quelltransaktion
+  beziehungsweise Economic Event (`assigned`, `no_envelope`, `later`).
 - `recurring_items`, `forecast_entries`, `reconciliation_runs`: Planung.
 
 Das vollständige SQLAlchemy-Schema ist in `app/db/models.py` definiert und über
@@ -52,3 +54,6 @@ Alembic versioniert.
 - Ein Economic Event mit Umschlagzuordnung erzeugt eine Forderung gegen den Umschlag,
   aber keine physische Bewegung. Der gezählte Ist-Bestand ändert sich erst durch
   einen neuen bestätigten Snapshot oder eine ausdrückliche `envelope_movement`.
+- „Kein Umschlag“ ist ein persistierter finaler Zustand und daher nicht mit einem
+  noch leeren `economic_events.envelope_id` gleichzusetzen. Wiederholtes Speichern
+  aktualisiert dieselbe Entscheidung und erzeugt keine doppelte Sollwirkung.

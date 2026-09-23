@@ -35,11 +35,11 @@ def main() -> None:
     settings = get_settings()
     settings.ensure_local_directories()
     if args.command == "backup":
-        print(create_backup(settings.database_url, settings.backup_dir))
+        print(create_backup(settings.active_database_url, settings.active_backup_dir))
     elif args.command == "restore":
         result = restore_backup(
-            settings.database_url,
-            settings.backup_dir,
+            settings.active_database_url,
+            settings.active_backup_dir,
             args.backup,
             confirm=args.confirm,
             restore_config=args.restore_config,

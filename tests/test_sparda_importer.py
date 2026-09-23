@@ -29,6 +29,7 @@ from app.db.session import get_db
 from app.domain.sparda import classify_sparda_transaction, suggest_sparda_category
 from app.importers.sparda import (
     KNOWN_COLUMNS,
+    PrivateProfileRequiredError,
     SpardaFormatError,
     import_sparda_batch,
     parse_german_date,
@@ -36,6 +37,7 @@ from app.importers.sparda import (
     parse_sparda_csv,
 )
 from app.main import app
+from app.seed import demo as demo_seed
 from app.services.import_staging import stage_upload
 
 D = Decimal
@@ -48,6 +50,8 @@ def sparda_store(tmp_path: Path) -> tuple[Settings, sessionmaker[Session]]:
     database_url = f"sqlite:///{database_path.as_posix()}"
     settings = Settings(
         database_url=database_url,
+        private_database_url=database_url,
+        demo_mode=False,
         private_data_dir=tmp_path / "private",
         backup_dir=tmp_path / "backups",
         log_dir=tmp_path / "logs",
@@ -491,3 +495,58 @@ def test_synthetic_sparda_import_end_to_end_through_ui(
         batch = db.get(ImportBatch, batch_id)
         assert batch.status == "imported"
         assert batch.metadata_json["import_summary"]["expenses"] == 1
+
+
+def test_demo_profile_blocks_productive_sparda_import_without_writes(
+    sparda_store: tuple[Settings, sessionmaker[Session]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    private_settings, factory = sparda_store
+    demo_settings = Settings(
+        database_url=private_settings.private_database_url,
+        demo_mode=True,
+        private_data_dir=private_settings.private_data_dir,
+        backup_dir=private_settings.backup_dir,
+        log_dir=private_settings.log_dir,
+    )
+    demo_settings.ensure_local_directories()
+    batch = _stage(demo_settings, factory, _csv_bytes([_row()]))
+
+    with pytest.raises(PrivateProfileRequiredError, match="Demo-Profil"):
+        import_sparda_batch(factory, batch.id, demo_settings)
+
+    def override_db() -> Generator[Session, None, None]:
+        with factory() as db:
+            yield db
+
+    monkeypatch.setattr("app.web.routes.get_settings", lambda: demo_settings)
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            preview = client.get(f"/import/{batch.id}/preview")
+            assert preview.status_code == 200
+            assert "Produktivimport gesperrt" in preview.text
+            assert "Atomaren Import starten" not in preview.text
+            response = client.post(f"/import/{batch.id}/execute")
+            assert response.status_code == 409
+    finally:
+        app.dependency_overrides.clear()
+
+    with factory() as db:
+        assert db.get(ImportBatch, batch.id).status == "valid"
+        assert db.scalar(select(func.count()).select_from(RawImportRecord)) == 0
+        assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 0
+        assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 0
+
+
+def test_demo_seed_refuses_private_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(
+        private_database_url=f"sqlite:///{(tmp_path / 'private.db').as_posix()}",
+        demo_mode=False,
+    )
+    monkeypatch.setattr(demo_seed, "get_settings", lambda: settings)
+
+    def unexpected_upgrade() -> None:
+        raise AssertionError("private profile must not be migrated or seeded by demo seed")
+
+    monkeypatch.setattr(demo_seed, "upgrade_database", unexpected_upgrade)
+    demo_seed.seed_demo()

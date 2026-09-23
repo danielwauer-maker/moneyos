@@ -26,7 +26,7 @@
       {% endfor %}
     </nav>
     <div class="sidebar-foot">
-      <span class="status-dot"></span><div><strong>Demo-Profil</strong><small>Nur lokale Daten</small></div>
+      <span class="status-dot"></span><div><strong>{{ profile_label }}</strong><small>{% if private_import_enabled %}Private lokale Daten{% else %}Produktivimport gesperrt{% endif %}</small></div>
     </div>
   </aside>
   <main class="shell">

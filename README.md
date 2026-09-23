@@ -105,9 +105,14 @@ sind vollständig fiktiv. Docker veröffentlicht Port 8000 ausschließlich auf
 
 ## Nächster Schritt
 
-Ein realer Sparda-Export kann auf der Seite `Import` mit Quelle `Sparda` ausgewählt
-werden. MoneyOS validiert und zeigt zunächst eine redigierte Vorschau; importiert
-wird erst nach „Atomaren Import starten“. Vor dem ersten privaten Import sollte
-mit `python -m app.ops backup` ein Backup erstellt und mit
-`python -m app.ops diagnostics` der lokale Zustand geprüft werden. PayPal-, Amex-
-und Amazon-Parser bleiben spätere, getrennte Adapter.
+Vor einem realen Import in `.env` `MONEYOS_DEMO_MODE=false` setzen und die App neu
+starten. Das Privat-Profil verwendet standardmäßig
+`data/private/profiles/private/moneyos.db`; die Seitenleiste muss danach
+`Privat-Profil` anzeigen. Im Demo-Profil ist der produktive Sparda-Import hart
+gesperrt und Demo-Daten werden nie in die private Datenbank übernommen.
+
+Danach `python -m app.ops diagnostics` ausführen und den realen Sparda-Export auf
+der Seite `Import` neu auswählen. MoneyOS validiert und zeigt zunächst eine
+redigierte Vorschau; importiert wird erst nach „Atomaren Import starten“. Eine
+zuvor im Demo-Profil bereitgestellte Datei wird absichtlich nicht profilübergreifend
+übernommen. PayPal-, Amex- und Amazon-Parser bleiben spätere, getrennte Adapter.

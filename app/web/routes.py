@@ -19,7 +19,17 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 
 def render(request: Request, template: str, **context: object) -> HTMLResponse:
-    return templates.TemplateResponse(request, template, {"request": request, **context})
+    settings = get_settings()
+    return templates.TemplateResponse(
+        request,
+        template,
+        {
+            "request": request,
+            "profile_label": "Demo-Profil" if settings.demo_mode else "Privat-Profil",
+            "private_import_enabled": not settings.demo_mode,
+            **context,
+        },
+    )
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -178,6 +188,11 @@ def preview_sparda(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
 
 @router.post("/import/{batch_id}/execute")
 def execute_sparda(batch_id: int, db: DbSession) -> RedirectResponse:
+    if get_settings().demo_mode:
+        raise HTTPException(
+            status_code=409,
+            detail="Produktive Sparda-Importe sind im Demo-Profil gesperrt.",
+        )
     batch = db.get(ImportBatch, batch_id)
     if batch is None or batch.source_type != "sparda" or batch.status != "valid":
         raise HTTPException(status_code=404, detail="Valid Sparda import batch not found")

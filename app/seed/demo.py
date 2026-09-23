@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.db.migrations import upgrade_database
 from app.db.models import (
     Account,
@@ -53,6 +54,9 @@ BASELINES = {
 
 
 def seed_demo() -> None:
+    if not get_settings().demo_mode:
+        print("Privat-Profil aktiv. Demo-Seed wird nicht geladen.")
+        return
     upgrade_database()
     with SessionLocal.begin() as session:
         if session.scalar(select(Account.id).limit(1)):

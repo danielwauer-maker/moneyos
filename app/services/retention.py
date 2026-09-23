@@ -31,7 +31,7 @@ def plan_retention(settings: Settings, now: datetime | None = None) -> list[Rete
     categories = (
         ("staged", settings.staging_dir, settings.staged_import_retention_days),
         ("quarantine", settings.quarantine_dir, settings.quarantine_retention_days),
-        ("log", settings.log_dir, settings.log_retention_days),
+        ("log", settings.active_log_dir, settings.log_retention_days),
     )
     for category, root, days in categories:
         candidates.extend(
@@ -39,15 +39,15 @@ def plan_retention(settings: Settings, now: datetime | None = None) -> list[Rete
         )
 
     backups = sorted(
-        (path for path in settings.backup_dir.glob("moneyos-*.zip") if path.is_file()),
+        (path for path in settings.active_backup_dir.glob("moneyos-*.zip") if path.is_file()),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
     protected_count = max(1, settings.minimum_backups_to_keep)
     eligible = backups[protected_count:]
-    old_eligible = set(_old_files(settings.backup_dir, settings.backup_retention_days, now))
+    old_eligible = set(_old_files(settings.active_backup_dir, settings.backup_retention_days, now))
     candidates.extend(
-        RetentionCandidate("backup", path, settings.backup_dir)
+        RetentionCandidate("backup", path, settings.active_backup_dir)
         for path in eligible
         if path in old_eligible
     )

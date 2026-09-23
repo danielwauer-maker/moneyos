@@ -15,8 +15,12 @@ PDF-Signatur und aktive PDF-Marker, JSON-Syntax sowie ZIP-Struktur geprüft. ZIP
 werden nicht extrahiert. Makros, Skripte, ausführbare Inhalte, Pfadtraversal und
 verschlüsselte Archive führen zur Quarantäne. Eingebetteter Inhalt wird nie ausgeführt.
 
-Standardmäßig liegen valide Originale unter `data/private/imports/staging/` und
-abgewiesene Originale unter `data/private/imports/quarantine/`. Die Dateien tragen
+Im Demo-Profil liegen valide Originale unter `data/private/imports/staging/` und
+abgewiesene Originale unter `data/private/imports/quarantine/`. Dieses Profil
+erlaubt Vorschauen, sperrt aber jeden produktiven Sparda-Import. Im Privat-Profil
+liegen die entsprechenden Dateien getrennt unter
+`data/private/profiles/private/imports/staging/` beziehungsweise `quarantine/`;
+seine Datenbank ist `data/private/profiles/private/moneyos.db`. Die Dateien tragen
 einen Hashnamen. Eine Quarantäne speichert maschinenlesbare Fehlercodes am Batch;
 es findet kein Teilimport statt. Die UI gibt weder Rohinhalt noch Dateinamen aus.
 
@@ -69,6 +73,12 @@ Vorschau. Erst die ausdrückliche Bestätigung startet den atomaren Import. Die
 Zusammenfassung nennt Quellzeilen, neue Raw-/Source-Datensätze, Economic Events,
 Typzählungen, Reviews, Zeilen-/Dateiduplikate und Fehlzeilen, niemals IBAN/BIC,
 Gläubiger-ID, Mandatsreferenz oder Raw-Zahlungsidentifikatoren.
+
+Vor privaten Daten muss die App mit `MONEYOS_DEMO_MODE=false` neu gestartet
+werden. Die Seitenleiste muss `Privat-Profil` anzeigen. Eine bereits im
+Demo-Profil bereitgestellte Datei wird nicht übernommen: Das Original wird im
+Privat-Profil bewusst erneut ausgewählt, validiert und gehasht. Dadurch können
+Demo-Batches und private Economic Events nicht in derselben Datenbank landen.
 
 Importer dürfen niemals direkt Präsentationswerte erzeugen. Wiederholte Ausführung
 muss durch Hashes/Fingerprints idempotent sein. PayPal-Zeilen werden möglichst über

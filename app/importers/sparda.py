@@ -68,6 +68,10 @@ class SpardaFormatError(ValueError):
         self.row_number = row_number
 
 
+class PrivateProfileRequiredError(RuntimeError):
+    """Raised when a productive import is attempted in the demo profile."""
+
+
 @dataclass(frozen=True)
 class SpardaRow:
     row_number: int
@@ -97,6 +101,7 @@ class ImportSummary:
     income: int = 0
     refunds: int = 0
     review_items: int = 0
+    review_only_rows: int = 0
     duplicate_rows: int = 0
     duplicate_files: int = 0
     failed_rows: int = 0
@@ -261,6 +266,8 @@ def preview_sparda_file(path: Path) -> tuple[list[PreviewRow], ImportSummary]:
             _increment_event(summary, decision.event_type)
         if decision.review_type:
             summary.review_items += 1
+            if decision.event_type is None:
+                summary.review_only_rows += 1
         previews.append(
             PreviewRow(
                 row_number=row.row_number,
@@ -431,6 +438,8 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
                 )
             )
             summary.review_items += 1
+            if decision.event_type is None:
+                summary.review_only_rows += 1
 
     batch.metadata_json = {**(batch.metadata_json or {}), "import_summary": summary.as_dict()}
     return len(rows)
@@ -439,4 +448,6 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
 def import_sparda_batch(
     session_factory: sessionmaker[Session], batch_id: int, settings: Settings
 ) -> None:
+    if settings.demo_mode:
+        raise PrivateProfileRequiredError("Produktive Sparda-Importe sind im Demo-Profil gesperrt.")
     run_atomic_import(session_factory, batch_id, _import_rows, settings)

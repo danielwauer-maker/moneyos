@@ -9,7 +9,7 @@ from app.db.base import Base
 
 config = context.config
 config.set_main_option(
-    "sqlalchemy.url", config.attributes.get("database_url", get_settings().database_url)
+    "sqlalchemy.url", config.attributes.get("database_url", get_settings().active_database_url)
 )
 if config.config_file_name:
     fileConfig(config.config_file_name)

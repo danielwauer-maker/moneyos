@@ -2,11 +2,13 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
     app_name: str = "MoneyOS"
     database_url: str = "sqlite:///./data/moneyos.db"
+    private_database_url: str = "sqlite:///./data/private/profiles/private/moneyos.db"
     demo_mode: bool = True
     private_data_dir: Path = Path("data/private")
     backup_dir: Path = Path("backups")
@@ -21,25 +23,46 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="MONEYOS_", extra="ignore")
 
     def ensure_local_directories(self) -> None:
-        if self.database_url.startswith("sqlite:///./"):
-            Path(self.database_url.removeprefix("sqlite:///./")).parent.mkdir(
-                parents=True, exist_ok=True
-            )
+        database = make_url(self.active_database_url).database
+        if self.active_database_url.startswith("sqlite") and database and database != ":memory:":
+            Path(database).parent.mkdir(parents=True, exist_ok=True)
         for directory in (
             self.staging_dir,
             self.quarantine_dir,
-            self.backup_dir,
-            self.log_dir,
+            self.active_backup_dir,
+            self.active_log_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 
     @property
+    def profile_name(self) -> str:
+        return "demo" if self.demo_mode else "private"
+
+    @property
+    def active_database_url(self) -> str:
+        return self.database_url if self.demo_mode else self.private_database_url
+
+    @property
+    def profile_private_data_dir(self) -> Path:
+        if self.demo_mode:
+            return self.private_data_dir
+        return self.private_data_dir / "profiles" / "private"
+
+    @property
+    def active_backup_dir(self) -> Path:
+        return self.backup_dir if self.demo_mode else self.backup_dir / "private"
+
+    @property
+    def active_log_dir(self) -> Path:
+        return self.log_dir if self.demo_mode else self.log_dir / "private"
+
+    @property
     def staging_dir(self) -> Path:
-        return self.private_data_dir / "imports" / "staging"
+        return self.profile_private_data_dir / "imports" / "staging"
 
     @property
     def quarantine_dir(self) -> Path:
-        return self.private_data_dir / "imports" / "quarantine"
+        return self.profile_private_data_dir / "imports" / "quarantine"
 
 
 @lru_cache

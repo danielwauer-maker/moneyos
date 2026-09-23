@@ -52,7 +52,7 @@ def run_diagnostics(db: Session, settings: Settings) -> list[DiagnosticCheck]:
     except Exception:
         checks.append(DiagnosticCheck("schema", False, "Migrationsstand nicht lesbar"))
 
-    checks.append(_directory_check("backup_directory", settings.backup_dir))
+    checks.append(_directory_check("backup_directory", settings.active_backup_dir))
     checks.append(_directory_check("staging_directory", settings.staging_dir))
     try:
         free = shutil.disk_usage(settings.private_data_dir.resolve().anchor).free
@@ -60,7 +60,9 @@ def run_diagnostics(db: Session, settings: Settings) -> list[DiagnosticCheck]:
     except OSError:
         checks.append(DiagnosticCheck("free_disk_space", False, "nicht ermittelbar"))
 
-    backups = sorted(settings.backup_dir.glob("moneyos-*.zip"), key=lambda p: p.stat().st_mtime)
+    backups = sorted(
+        settings.active_backup_dir.glob("moneyos-*.zip"), key=lambda p: p.stat().st_mtime
+    )
     detail = backups[-1].name if backups else "noch kein erfolgreiches Backup"
     checks.append(DiagnosticCheck("last_successful_backup", bool(backups), detail))
     return checks

@@ -8,7 +8,7 @@ from app.db.engine import build_engine
 settings = get_settings()
 settings.ensure_local_directories()
 
-engine = build_engine(settings.database_url)
+engine = build_engine(settings.active_database_url)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 

@@ -5,6 +5,17 @@ Docker veröffentlicht den Container-Port ausschließlich an `127.0.0.1` des Hos
 Es gibt keine Cloud-Synchronisierung, Telemetrie, externes Key-Management oder
 Uploads zu Drittdiensten.
 
+## Demo-/Privat-Trennung
+
+Das Demo-Profil (`MONEYOS_DEMO_MODE=true`) nutzt `data/moneyos.db`; produktive
+Sparda-Imports sind dort hart gesperrt. Das Privat-Profil
+(`MONEYOS_DEMO_MODE=false`) nutzt standardmäßig die eigene Datenbank
+`data/private/profiles/private/moneyos.db`, eigene Staging-/Quarantäneverzeichnisse
+unter `data/private/profiles/private/imports/`, Backups unter `backups/private/`
+und Logs unter `logs/private/`. Der Demo-Seed schreibt niemals in das
+Privat-Profil. Ein Profilwechsel erfordert einen Neustart der App; vor einem
+privaten Import muss die Seitenleiste ausdrücklich `Privat-Profil` anzeigen.
+
 ## Aktuelle Verschlüsselungsgrenze
 
 SQLite verschlüsselt die Datenbankdatei nicht. Auch die ZIP-Backups sind nicht

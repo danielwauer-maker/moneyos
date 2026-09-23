@@ -11,5 +11,5 @@ def upgrade_database(database_url: str | None = None) -> None:
     repository_root = Path(__file__).resolve().parents[2]
     config = Config(str(repository_root / "alembic.ini"))
     config.set_main_option("script_location", str(repository_root / "alembic"))
-    config.attributes["database_url"] = database_url or get_settings().database_url
+    config.attributes["database_url"] = database_url or get_settings().active_database_url
     command.upgrade(config, "head")

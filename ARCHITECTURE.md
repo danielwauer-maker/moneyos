@@ -30,6 +30,14 @@ Ereignisse begründet.
 
 ## Private Importgrenze
 
+Demo- und Privat-Profil besitzen getrennte Datenbanken und getrennte operative
+Verzeichnisse. `MONEYOS_DEMO_MODE=true` verwendet weiterhin `data/moneyos.db` und
+`data/private/imports/`; `false` verwendet standardmäßig
+`data/private/profiles/private/moneyos.db` und ausschließlich Unterverzeichnisse
+von `data/private/profiles/private/`. Produktive Sparda-Imports sind im
+Demo-Profil auf Service- und HTTP-Ebene gesperrt. Der Demo-Seed beendet sich im
+Privat-Profil ohne Schreibzugriff.
+
 `app/services/import_staging.py` übernimmt Streaming, SHA-256, unveränderte lokale
 Ablage, Dateityp-/Inhaltsprüfung und Quarantäne. Erst ein Batch im Zustand `valid`
 darf an `app/services/import_execution.py` übergeben werden. Der spätere Parser-

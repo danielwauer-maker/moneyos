@@ -1,0 +1,6 @@
+@media (max-width: 760px) {
+  .brand > span:last-child { display: none; }
+  .nav-link { justify-content: center; font-size: 0; position: relative; }
+  .nav-link .nav-icon { font-size: 15px; }
+  .nav-badge { position: absolute; margin: 24px 0 0 30px; font-size: 10px; }
+}

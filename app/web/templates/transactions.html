@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block content %}
+<div class="toolbar"><div class="filter-group"><button class="filter active">Alle</button><button class="filter">Ausgaben</button><button class="filter">Einnahmen</button><button class="filter">Transfers</button><button class="filter">Refunds</button></div><button class="secondary-button">Filter</button></div>
+<article class="panel table-panel"><table><thead><tr><th>Datum</th><th>Händler / Empfänger</th><th>Betrag</th><th>Konto</th><th>Kategorie</th><th>Umschlag</th><th>Projekt / Tag</th><th>Status</th></tr></thead><tbody>
+{% for event in events %}<tr><td>{{ event.occurred_at.strftime('%d.%m.%Y') }}</td><td><strong>{{ event.description }}</strong></td><td class="amount {% if event.event_type == 'expense' %}red{% else %}green{% endif %}">{{ ('-' if event.event_type == 'expense' else '+') }}{{ event.amount|euro }}</td><td>{{ event.account.name if event.account else '—' }}</td><td>{{ event.category.name if event.category else 'Offen' }}</td><td>{{ event.envelope.name if event.envelope else '—' }}</td><td>{{ event.project.name if event.project else '—' }}</td><td><span class="badge {% if event.status == 'booked' %}success{% else %}neutral{% endif %}">{{ event.status }}</span></td></tr>{% endfor %}
+</tbody></table></article>
+{% endblock %}

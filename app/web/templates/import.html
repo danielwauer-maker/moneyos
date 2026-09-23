@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="intro"><div><h2>Datei sicher bereitstellen</h2><p>Die Originaldatei wird unverändert lokal gespeichert und vor jedem späteren Parserlauf geprüft.</p></div></div>
+{% if duplicate %}<div class="notice">Diese Datei war bereits vorhanden. Es wurde kein zweiter Import-Batch angelegt.</div>{% endif %}
+{% if selected_batch and (selected_batch.metadata_json or {}).get('import_summary') %}
+{% set result = selected_batch.metadata_json.import_summary %}
+<article class="panel">
+  <div class="panel-head"><div><h3>Import abgeschlossen · Batch #{{ selected_batch.id }}</h3><p>Atomar gespeichert; private Rohinhalte werden nicht angezeigt.</p></div><span class="badge success">imported</span></div>
+  <div class="recon-flow">
+    <article><span>1</span><small>Quellzeilen</small><strong>{{ result.source_rows_parsed }}</strong></article>
+    <article><span>2</span><small>Source Transactions</small><strong>{{ result.source_transactions_created }}</strong></article>
+    <article><span>3</span><small>Ereignisse</small><strong>{{ result.economic_events_created }}</strong></article>
+    <article><span>4</span><small>Reviews</small><strong>{{ result.review_items }}</strong></article>
+  </div>
+  <p>Neue Raw Records {{ result.new_raw_records }} · Transfers {{ result.transfers }} · Ausgaben {{ result.expenses }} · Einnahmen {{ result.income }} · Refunds {{ result.refunds }} · Duplikatzeilen {{ result.duplicate_rows }} · Dateiduplikate {{ 1 if duplicate else result.duplicate_files }} · Fehlzeilen {{ result.failed_rows }}</p>
+</article>
+{% endif %}
+<article class="panel">
+  <h3>Lokales Import-Staging</h3>
+  <p>Sparda CSV ist produktiv mit Vorschau und atomarem Import. PayPal-, Amex- und Amazon-Dateien werden weiterhin nur sicher bereitgestellt und noch nicht geparst.</p>
+  <form action="/import/stage" method="post" enctype="multipart/form-data" class="upload-form">
+    <label>Quelle <select name="source_type" required><option value="sparda">Sparda</option><option value="paypal">PayPal</option><option value="amex">American Express</option><option value="amazon">Amazon</option></select></label>
+    <label>Datei <input name="upload" type="file" required></label>
+    <button class="primary-button" type="submit">Prüfen und bereitstellen</button>
+  </form>
+</article>
+<article class="panel import-flow"><h3>Sicherer Ablauf</h3><ol><li>Upload</li><li>Hash</li><li>Validierung</li><li>Quarantäne</li><li>Duplikatprüfung</li><li>Später: Parser</li><li>Atomarer Import</li></ol></article>
+<div class="section-head"><div><h2>Import-Status</h2><p>Keine Dateinamen, Beschreibungen oder Rohdaten werden hier angezeigt.</p></div></div>
+<article class="panel table-panel"><table><thead><tr><th>Batch</th><th>Quelle</th><th>Status</th><th>Größe</th><th>Prüfung</th></tr></thead><tbody>
+{% for batch in batches %}<tr><td>#{{ batch.id }}</td><td>{{ batch.source_type }}</td><td><span class="badge {% if batch.status == 'valid' or batch.status == 'imported' %}success{% elif batch.status == 'quarantined' or batch.status == 'failed' %}warning{% else %}neutral{% endif %}">{{ batch.status }}</span></td><td>{{ batch.size_bytes or 0 }} Byte</td><td>{% for issue in (batch.validation_json or {}).get('issues', []) %}{{ issue.code }}{% if not loop.last %}, {% endif %}{% else %}{% if batch.source_type == 'sparda' and batch.status == 'valid' %}<a href="/import/{{ batch.id }}/preview">Vorschau</a>{% elif batch.status == 'imported' %}<a href="/import?batch_id={{ batch.id }}">Zusammenfassung</a>{% else %}–{% endif %}{% endfor %}</td></tr>{% else %}<tr><td colspan="5">Noch keine Dateien bereitgestellt.</td></tr>{% endfor %}
+</tbody></table></article>
+{% endblock %}

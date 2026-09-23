@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="intro"><div><h2>Guten Morgen</h2><p>Hier ist dein finanzieller Überblick für heute.</p></div><span class="date-pill">Stand: heute</span></div>
+<div class="kpi-grid">
+  <article class="kpi featured"><span>Gesamtvermögen</span><strong>{{ wealth|euro }}</strong><small>Umschläge im Tresor nur einmal gezählt</small></article>
+  <article class="kpi"><span>Frei verfügbar</span><strong>{{ free_available|euro }}</strong><small>Liquidität nach Monatsausgaben</small></article>
+  <article class="kpi"><span>Umschläge / reserviert</span><strong>{{ reserved|euro }}</strong><small>Physisch im Tresor enthalten</small></article>
+  <article class="kpi negative"><span>Kartenverbindlichkeiten</span><strong>{{ card_liabilities|euro }}</strong><small>Kreditkartenkonto</small></article>
+  <article class="kpi"><span>Cashflow aktueller Monat</span><strong class="{% if cashflow < 0 %}red{% else %}green{% endif %}">{{ cashflow|euro }}</strong><small>{{ income|euro }} rein · {{ expenses|euro }} raus</small></article>
+  <article class="kpi"><span>Transfer-Geld</span><strong>{{ reconciliation.transfer_money|euro }}</strong><small>Interne Umschlag-Umverteilung</small></article>
+  <article class="kpi warning"><span>Abhebung nötig</span><strong>{{ reconciliation.bank_withdrawal_needed|euro }}</strong><small>Nach freiem Tresorgeld</small></article>
+</div>
+
+<div class="section-head"><div><h2>Konten</h2><p>Aktuelle Salden deiner eigenen Konten.</p></div><a href="/accounts">Alle Konten →</a></div>
+<div class="account-grid">
+{% for account in accounts %}
+  <article class="account-card {% if account.is_liability %}liability{% endif %}">
+    <div class="account-top"><span class="account-symbol">{{ account.name[0] }}</span><span class="badge {% if account.is_active %}success{% endif %}">{{ 'Aktiv' if account.is_active else 'Inaktiv' }}</span></div>
+    <p>{{ account.name }}</p><strong>{{ account.balance|euro }}</strong><small>{{ account.account_type|replace('_',' ')|title }}</small>
+  </article>
+{% endfor %}
+</div>
+
+<div class="two-col">
+  <article class="panel">
+    <div class="panel-head"><div><h3>Einnahmen vs. Ausgaben</h3><p>Aktueller Monat</p></div><span class="badge neutral">Live aus SQLite</span></div>
+    {% set total = income + expenses %}
+    <div class="bar-row"><span>Einnahmen</span><div class="bar"><i class="income" style="width: {{ (income / total * 100) if total else 0 }}%"></i></div><strong>{{ income|euro }}</strong></div>
+    <div class="bar-row"><span>Ausgaben</span><div class="bar"><i class="expense" style="width: {{ (expenses / total * 100) if total else 0 }}%"></i></div><strong>{{ expenses|euro }}</strong></div>
+  </article>
+  <article class="panel forecast">
+    <div class="panel-head"><div><h3>Liquiditätsprognose</h3><p>Nächste 8 Wochen</p></div><a href="/planning">Details →</a></div>
+    <div class="chart-placeholder"><span>6.200 €</span><svg viewBox="0 0 540 110" preserveAspectRatio="none"><path d="M0 85 C65 75,85 34,145 48 S245 92,305 54 S400 32,540 18" fill="none" stroke="#0f766e" stroke-width="4"/><path d="M0 85 C65 75,85 34,145 48 S245 92,305 54 S400 32,540 18 L540 110 L0 110Z" fill="url(#g)"/><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#14b8a6" stop-opacity=".2"/><stop offset="1" stop-color="#14b8a6" stop-opacity="0"/></linearGradient></defs></svg></div>
+  </article>
+</div>
+
+<div class="two-col wide-left">
+  <article class="panel">
+    <div class="panel-head"><div><h3>Letzte Transaktionen</h3><p>Wirtschaftliche Ereignisse, nicht Rohzeilen</p></div><a href="/transactions">Alle ansehen →</a></div>
+    <div class="transaction-list">
+    {% for event in recent_events %}
+      <div class="transaction"><span class="merchant-avatar">{{ event.description[0] }}</span><div><strong>{{ event.description }}</strong><small>{{ event.occurred_at.strftime('%d.%m.%Y') }} · {{ event.account.name if event.account else '—' }}</small></div><span class="badge neutral">{{ event.event_type }}</span><b class="{% if event.event_type == 'expense' %}red{% else %}green{% endif %}">{{ ('-' if event.event_type == 'expense' else '+') }}{{ event.amount|euro }}</b></div>
+    {% endfor %}
+    </div>
+  </article>
+  <article class="panel">
+    <div class="panel-head"><div><h3>Offene Reviews</h3><p>Unsichere Zuordnungen</p></div><span class="review-count">{{ open_reviews }}</span></div>
+    <div class="empty-illustration">✓</div><p class="centered">Prüfe Vorschläge und erstelle Regeln für ähnliche Transaktionen.</p><a class="secondary-button full" href="/review">Review-Inbox öffnen</a>
+  </article>
+</div>
+{% endblock %}

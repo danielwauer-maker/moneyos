@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block content %}
+<div class="intro"><div><h2>Physische Bargeldumschläge</h2><p>Eigenständige Dimension, als Unterbestand im Tresor geführt.</p></div><span class="info-chip">Im Tresor enthalten: {{ reserved|euro }}</span></div>
+<div class="envelope-grid">{% for row in envelopes %}<article class="envelope-card"><div class="envelope-icon">▰</div><div><p>{{ row.envelope.name }}</p><strong>{{ row.actual|euro }}</strong><small>{% if row.envelope.target_rule_type == 'target_balance' %}Zielbestand {{ row.envelope.target_amount|euro }}{% else %}Monatliche Zuführung{% endif %}</small></div><span class="badge {% if row.delta == 0 %}success{% else %}neutral{% endif %}">{{ row.delta|euro }} Delta</span></article>{% endfor %}</div>
+<div class="section-head"><div><h2>Umschlag-Abgleich</h2><p>Transfer-Geld ist ausschließlich interne Umverteilung.</p></div></div>
+<div class="recon-flow">
+{% set steps = [('Einzahlen gesamt', reconciliation.deposit_total),('Entnehmen gesamt', reconciliation.withdraw_total),('Transfer-Geld', reconciliation.transfer_money),('Restbedarf', reconciliation.remaining_need),('Freies Tresorgeld vorher', free_vault),('Tresorgeld eingesetzt', reconciliation.free_vault_cash_used),('Abhebung vom Girokonto', reconciliation.bank_withdrawal_needed),('Tresorgeld danach', reconciliation.free_vault_cash_after)] %}
+{% for label, value in steps %}<article><span>{{ loop.index }}</span><small>{{ label }}</small><strong>{{ value|euro }}</strong></article>{% endfor %}
+</div>
+<article class="panel table-panel"><table><thead><tr><th>Umschlag</th><th>Physisch Ist</th><th>Physisch Soll</th><th>Delta</th><th>Aktion</th></tr></thead><tbody>{% for row in envelopes %}<tr><td><strong>{{ row.envelope.name }}</strong></td><td>{{ row.actual|euro }}</td><td>{{ row.target|euro }}</td><td>{{ row.delta|euro }}</td><td><span class="badge {% if row.delta > 0 %}warning{% elif row.delta < 0 %}neutral{% else %}success{% endif %}">{% if row.delta > 0 %}Einzahlen{% elif row.delta < 0 %}Entnehmen{% else %}Keine Aktion{% endif %}</span></td></tr>{% endfor %}</tbody></table></article>
+{% endblock %}

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page_title }} · MoneyOS</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='responsive.css') }}">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="brand-mark">M</span><span>MoneyOS<small>Personal Finance</small></span></a>
+    <nav>
+      {% set nav = [
+        ('dashboard','/','Übersicht','grid'), ('transactions','/transactions','Transaktionen','arrow'),
+        ('envelopes','/envelopes','Umschläge','wallet'), ('accounts','/accounts','Konten','card'),
+        ('planning','/planning','Planung','chart'), ('projects','/projects','Projekte','folder'),
+        ('categories','/categories','Kategorien','tag'), ('review','/review','Prüfen','check'),
+        ('import','/import','Import','upload'), ('settings','/settings','Einstellungen','gear')
+      ] %}
+      {% for key, href, label, icon in nav %}
+      <a href="{{ href }}" class="nav-link {% if active == key %}active{% endif %}">
+        <span class="nav-icon">{% include 'icons/' + icon + '.svg' ignore missing %}</span>{{ label }}
+        {% if key == 'review' and open_reviews %}<span class="nav-badge">{{ open_reviews }}</span>{% endif %}
+      </a>
+      {% endfor %}
+    </nav>
+    <div class="sidebar-foot">
+      <span class="status-dot"></span><div><strong>Demo-Profil</strong><small>Nur lokale Daten</small></div>
+    </div>
+  </aside>
+  <main class="shell">
+    <header class="topbar">
+      <div><p class="eyebrow">MoneyOS / {{ page_title }}</p><h1>{{ page_title }}</h1></div>
+      <div class="top-actions">
+        <label class="search"><span>⌕</span><input type="search" placeholder="Suchen …" aria-label="Suchen"></label>
+        <button class="icon-button" aria-label="Darstellung">☼</button>
+        <button class="icon-button" aria-label="Benachrichtigungen">♢</button>
+        <button class="primary-button">＋ Neue Transaktion</button>
+      </div>
+    </header>
+    <section class="content">{% block content %}{% endblock %}</section>
+  </main>
+</body>
+</html>

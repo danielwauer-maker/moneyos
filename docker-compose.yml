@@ -1,0 +1,15 @@
+services:
+  moneyos:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      MONEYOS_DATABASE_URL: sqlite:////app/data/moneyos.db
+      MONEYOS_DEMO_MODE: "true"
+    volumes:
+      - moneyos_data:/app/data
+      - moneyos_backups:/app/backups
+    restart: unless-stopped
+volumes:
+  moneyos_data:
+  moneyos_backups:

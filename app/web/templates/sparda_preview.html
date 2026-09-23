@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="intro"><div><h2>Sparda-Import prüfen</h2><p>Die Datei ist valide. Identifikatoren und vollständige Zahlungsdaten werden nicht angezeigt.</p></div></div>
+<div class="kpi-grid">
+  <article class="kpi"><span>Quellzeilen</span><strong>{{ summary.source_rows_parsed }}</strong><small>UTF-8/BOM und Semikolon geprüft</small></article>
+  <article class="kpi"><span>Transfers</span><strong>{{ summary.transfers }}</strong><small>Keine gewöhnlichen Ausgaben</small></article>
+  <article class="kpi"><span>Ausgaben / Einnahmen</span><strong>{{ summary.expenses }} / {{ summary.income }}</strong><small>Deterministische Regeln</small></article>
+  <article class="kpi warning"><span>Prüfbedarf</span><strong>{{ summary.review_items }}</strong><small>Wird in „Prüfen“ angelegt</small></article>
+</div>
+<article class="panel table-panel" style="margin-top:18px"><table><thead><tr><th>Zeile</th><th>Datum</th><th>Sichere Beschreibung</th><th>Typ</th><th>Kategorie</th><th>Betrag</th><th>Review</th></tr></thead><tbody>
+{% for row in rows %}<tr><td>{{ row.row_number }}</td><td>{{ row.booked_at }}</td><td>{{ row.description }}</td><td>{{ row.event_type }}</td><td>{{ row.category or '–' }}</td><td class="amount">{{ row.amount }}</td><td>{{ 'ja' if row.needs_review else 'nein' }}</td></tr>{% endfor %}
+</tbody></table></article>
+{% if truncated %}<div class="notice">Die Vorschau zeigt aus Datenschutz- und Leistungsgründen nur die ersten 100 Zeilen.</div>{% endif %}
+<form action="/import/{{ batch.id }}/execute" method="post" style="margin-top:18px"><button class="primary-button" type="submit">Atomaren Import starten</button> <a class="secondary-button" href="/import">Abbrechen</a></form>
+{% endblock %}

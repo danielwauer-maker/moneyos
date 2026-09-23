@@ -1,0 +1,34 @@
+# Datenmodell
+
+Grundprinzipien: Rohimporte sind unveränderlich; Quelltransaktionen und
+wirtschaftliche Ereignisse bleiben getrennt; Verknüpfungen sind explizit;
+historische Regeln haben Gültigkeitszeiträume; Geld nutzt Decimal/NUMERIC.
+
+Kernbereiche:
+
+- `accounts`: eigene Aktiv- und Passivkonten; Amazon ist kein Konto.
+- `import_batches`, `raw_import_records`, `source_transactions`: Importkette.
+- `economic_events`, `event_source_links`: kanonische Ausgaben, Einnahmen,
+  Transfers und Refunds sowie ihre Quellen.
+- `categories`: hierarchische Kategorien.
+- `envelopes`, `envelope_rule_periods`, `envelope_snapshots`,
+  `envelope_movements`: physische Umschläge, Historie und Bewegungen.
+- `projects`: unabhängige Tags/Projekte.
+- `review_items`, `assignment_rules`: nachvollziehbare Entscheidungen.
+- `recurring_items`, `forecast_entries`, `reconciliation_runs`: Planung.
+
+Das vollständige SQLAlchemy-Schema ist in `app/db/models.py` definiert und über
+Alembic versioniert.
+
+## Integritätsregeln
+
+- `raw_import_records` und `source_transactions` sind auf ORM- und Datenbankebene
+  unveränderlich; Korrekturen werden als neue Datensätze beziehungsweise Links
+  modelliert.
+- `envelope_rule_periods` sind append-only und dürfen sich je Umschlag und Regeltyp
+  zeitlich nicht überschneiden.
+- Genau ein `canonical_source`-Link ist je Source Transaction möglich.
+- Persistierte Geldwerte verwenden `NUMERIC(14,2)` und werden als `Decimal`
+  geladen. Binäre Float-Spalten sind nicht zulässig.
+- Ereignistypen, Confidence/Probability und nichtnegative Ziel-/Bestandswerte
+  werden durch Datenbank-Constraints geschützt.

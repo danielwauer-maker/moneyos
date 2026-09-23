@@ -1,0 +1,113 @@
+# MoneyOS
+
+MoneyOS ist eine lokale persönliche Finanz-Web-App mit FastAPI, SQLAlchemy, SQLite,
+Alembic und Jinja2; die Templates sind für lokale HTMX-Interaktionen vorbereitet.
+Phase 2A ergänzt ein privates lokales Datei-Staging, Validierung und Quarantäne,
+atomare Importgrenzen, Backups/Restore, Aufbewahrungsregeln und eine Diagnose.
+Phase 2B enthält den produktiven Sparda-CSV-Adapter. PayPal-, Amex- und Amazon-
+Parser sind bewusst noch nicht enthalten.
+
+## Voraussetzungen
+
+- Windows 10/11
+- Python 3.12 oder neuer (`py -3.12`)
+- optional Docker Desktop
+
+## Lokaler Start unter Windows
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\setup.ps1
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --reload
+```
+
+Danach: <http://127.0.0.1:8000>. Beim Start werden Alembic-Migrationen automatisch
+bis `head` ausgeführt. Der Seed ist idempotent und überschreibt keine
+vorhandenen Daten. Für einen leeren privaten Start `MONEYOS_DEMO_MODE=false` setzen
+und den Seed-Schritt auslassen.
+
+Manuell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m app.seed.demo
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --reload
+```
+
+## Tests und Lint
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+.\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m ruff format --check .
+.\.venv\Scripts\python.exe -m alembic check
+```
+
+## Private Daten und Betrieb
+
+Die Standardpfade sind relativ zum Projektverzeichnis:
+
+- aktive SQLite-Datenbank: `data/moneyos.db`
+- unveränderte, valide Staging-Dateien: `data/private/imports/staging/`
+- abgewiesene Dateien: `data/private/imports/quarantine/`
+- Backups: `backups/` (außerhalb des aktiven DB-Verzeichnisses `data/`)
+- Logs: `logs/`
+
+Alle Pfade sowie Größen- und Aufbewahrungsgrenzen sind über `.env` konfigurierbar.
+Diese Verzeichnisse, Finanzexporte, Datenbanken, Logs und `.env` sind von Git
+ausgeschlossen. Die Importansicht zeigt Status und maschinenlesbare Fehlercodes,
+aber keine Rohinhalte oder ursprünglichen Dateinamen.
+
+```powershell
+.\.venv\Scripts\python.exe -m app.ops diagnostics
+.\.venv\Scripts\python.exe -m app.ops backup
+
+# App vorher stoppen; vor dem Restore entsteht automatisch ein Safety-Backup
+.\.venv\Scripts\python.exe -m app.ops restore .\backups\moneyos-...-regular.zip --confirm
+
+# optional auch die im Backup enthaltene .env wiederherstellen
+.\.venv\Scripts\python.exe -m app.ops restore .\backups\moneyos-...-regular.zip --confirm --restore-config
+
+# erst anzeigen, dann ausdrücklich anwenden
+.\.venv\Scripts\python.exe -m app.ops retention
+.\.venv\Scripts\python.exe -m app.ops retention --apply --confirm
+
+# Originaldatei eines Batches löschen; Metadaten bleiben erhalten
+.\.venv\Scripts\python.exe -m app.ops delete-staged 123 --confirm
+```
+
+SQLite und Backup-ZIPs sind derzeit **nicht verschlüsselt**. Auf Windows werden
+BitLocker/Geräteverschlüsselung, ein geschütztes lokales Benutzerkonto und ein
+privates MoneyOS-Datenverzeichnis vorausgesetzt. Details: [SECURITY.md](SECURITY.md).
+
+## Docker
+
+```powershell
+docker compose up --build
+```
+
+SQLite-Daten, typische Finanzexportformate, Import-/Exportverzeichnisse, Logs,
+`.env` und private Quelldaten sind per `.gitignore` ausgeschlossen. Demo-Daten
+sind vollständig fiktiv. Docker veröffentlicht Port 8000 ausschließlich auf
+`127.0.0.1`.
+
+## Architektur und Regeln
+
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [DATA_MODEL.md](DATA_MODEL.md)
+- [BUSINESS_RULES.md](BUSINESS_RULES.md)
+- [IMPORTS.md](IMPORTS.md)
+- [SECURITY.md](SECURITY.md)
+- [UI_REFERENCE.md](UI_REFERENCE.md)
+- [CODEX_WORKFLOW.md](CODEX_WORKFLOW.md)
+
+## Nächster Schritt
+
+Ein realer Sparda-Export kann auf der Seite `Import` mit Quelle `Sparda` ausgewählt
+werden. MoneyOS validiert und zeigt zunächst eine redigierte Vorschau; importiert
+wird erst nach „Atomaren Import starten“. Vor dem ersten privaten Import sollte
+mit `python -m app.ops backup` ein Backup erstellt und mit
+`python -m app.ops diagnostics` der lokale Zustand geprüft werden. PayPal-, Amex-
+und Amazon-Parser bleiben spätere, getrennte Adapter.

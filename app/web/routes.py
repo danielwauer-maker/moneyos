@@ -6,12 +6,22 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.config import get_settings
-from app.db.models import Account, Category, EconomicEvent, ImportBatch, Project, ReviewItem
+from app.db.models import (
+    Account,
+    Category,
+    EconomicEvent,
+    ImportBatch,
+    Project,
+    ReviewItem,
+    SourceTransaction,
+    SourceTransactionAccount,
+)
 from app.db.session import get_db
 from app.importers.sparda import SpardaFormatError, import_sparda_batch, preview_sparda_file
 from app.services.dashboard import build_dashboard
 from app.services.diagnostics import run_diagnostics
 from app.services.import_staging import batch_file_path, stage_upload
+from app.services.reviews import build_review_view
 from app.web.templating import templates
 
 router = APIRouter()
@@ -46,6 +56,8 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
             select(EconomicEvent)
             .options(
                 selectinload(EconomicEvent.account),
+                selectinload(EconomicEvent.source_account),
+                selectinload(EconomicEvent.target_account),
                 selectinload(EconomicEvent.category),
                 selectinload(EconomicEvent.envelope),
                 selectinload(EconomicEvent.project),
@@ -113,11 +125,20 @@ def review(request: Request, db: DbSession) -> HTMLResponse:
                 selectinload(ReviewItem.economic_event),
                 selectinload(ReviewItem.proposed_category),
                 selectinload(ReviewItem.proposed_envelope),
+                selectinload(ReviewItem.source_transaction)
+                .selectinload(SourceTransaction.account_links)
+                .selectinload(SourceTransactionAccount.account),
             )
             .order_by(ReviewItem.status, ReviewItem.id)
         )
     )
-    return render(request, "review.html", active="review", page_title="Prüfen", reviews=rows)
+    return render(
+        request,
+        "review.html",
+        active="review",
+        page_title="Prüfen",
+        reviews=[build_review_view(row) for row in rows],
+    )
 
 
 @router.get("/import", response_class=HTMLResponse)

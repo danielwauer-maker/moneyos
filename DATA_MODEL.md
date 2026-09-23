@@ -8,6 +8,9 @@ Kernbereiche:
 
 - `accounts`: eigene Aktiv- und Passivkonten; Amazon ist kein Konto.
 - `import_batches`, `raw_import_records`, `source_transactions`: Importkette.
+- `source_transaction_accounts`: additive Konto-/Rollenverknüpfung für
+  unveränderliche Quelltransaktionen; `source` und optional `target` werden ohne
+  Änderung des Quelldatensatzes nachgetragen.
 - `economic_events`, `event_source_links`: kanonische Ausgaben, Einnahmen,
   Transfers und Refunds sowie ihre Quellen.
 - `categories`: hierarchische Kategorien.
@@ -30,5 +33,10 @@ Alembic versioniert.
 - Genau ein `canonical_source`-Link ist je Source Transaction möglich.
 - Persistierte Geldwerte verwenden `NUMERIC(14,2)` und werden als `Decimal`
   geladen. Binäre Float-Spalten sind nicht zulässig.
+- Unbestätigte Kontosalden bleiben durch `balance_confirmed=false` ausdrücklich
+  unbekannt und werden nicht als erfundene 0-Euro-Werte in Vermögen eingerechnet.
+- Transfers führen, soweit bekannt, `source_account_id` und `target_account_id`;
+  ihr positiver Betrag ist die transferierte Größe, die Richtung folgt aus den
+  Kontorollen.
 - Ereignistypen, Confidence/Probability und nichtnegative Ziel-/Bestandswerte
   werden durch Datenbank-Constraints geschützt.

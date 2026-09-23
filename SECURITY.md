@@ -15,6 +15,11 @@ unter `data/private/profiles/private/imports/`, Backups unter `backups/private/`
 und Logs unter `logs/private/`. Der Demo-Seed schreibt niemals in das
 Privat-Profil. Ein Profilwechsel erfordert einen Neustart der App; vor einem
 privaten Import muss die Seitenleiste ausdrücklich `Privat-Profil` anzeigen.
+Die private Stammdateninitialisierung ist bestätigungspflichtig und erzeugt vor
+dem Backfill automatisch ein Safety-Backup. Sie ändert keine Raw Records oder
+Source Transactions. Konto-, Salden- und Beitragswerte liegen in
+`data/private/profiles/private/master_data.json`; das gesamte `data/`-Verzeichnis
+ist ignoriert, sodass diese Werte nicht in Git gelangen.
 
 ## Aktuelle Verschlüsselungsgrenze
 

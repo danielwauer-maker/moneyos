@@ -20,15 +20,18 @@ from app.domain.reconciliation import reconcile_envelopes
 def build_dashboard(session: Session) -> dict[str, object]:
     accounts = list(session.scalars(select(Account).where(Account.is_active).order_by(Account.id)))
     by_type = {account.account_type: account for account in accounts}
+
+    def confirmed_balance(account_type: str) -> Decimal:
+        account = by_type.get(account_type)
+        return account.balance if account and account.balance_confirmed else Decimal()
+
     wealth = total_wealth(
         WealthInputs(
-            checking=by_type.get("checking").balance if by_type.get("checking") else Decimal(),
-            paypal=by_type.get("paypal").balance if by_type.get("paypal") else Decimal(),
-            wallet=by_type.get("cash_wallet").balance if by_type.get("cash_wallet") else Decimal(),
-            vault=by_type.get("cash_vault").balance if by_type.get("cash_vault") else Decimal(),
-            credit_card_liabilities=(
-                abs(by_type.get("credit_card").balance) if by_type.get("credit_card") else Decimal()
-            ),
+            checking=confirmed_balance("checking"),
+            paypal=confirmed_balance("paypal"),
+            wallet=confirmed_balance("cash_wallet"),
+            vault=confirmed_balance("cash_vault"),
+            credit_card_liabilities=(abs(confirmed_balance("credit_card"))),
         )
     )
     envelopes = list(
@@ -69,7 +72,8 @@ def build_dashboard(session: Session) -> dict[str, object]:
         )
     reserved = sum((row["actual"] for row in envelope_rows), Decimal())
     vault = by_type.get("cash_vault")
-    free_vault = max((vault.balance if vault else Decimal()) - reserved, Decimal())
+    vault_balance_confirmed = bool(vault and vault.balance_confirmed)
+    free_vault = max(confirmed_balance("cash_vault") - reserved, Decimal())
     reconciliation = reconcile_envelopes([row["delta"] for row in envelope_rows], free_vault)
     month_start = date.today().replace(day=1)
     income = session.scalar(
@@ -90,6 +94,8 @@ def build_dashboard(session: Session) -> dict[str, object]:
             select(EconomicEvent)
             .options(
                 selectinload(EconomicEvent.account),
+                selectinload(EconomicEvent.source_account),
+                selectinload(EconomicEvent.target_account),
                 selectinload(EconomicEvent.category),
                 selectinload(EconomicEvent.envelope),
                 selectinload(EconomicEvent.project),
@@ -109,19 +115,25 @@ def build_dashboard(session: Session) -> dict[str, object]:
     return {
         "accounts": accounts,
         "wealth": wealth,
+        "wealth_has_unknown": any(not account.balance_confirmed for account in accounts),
         "reserved": reserved,
-        "free_available": by_type.get("checking").balance - expenses
-        if by_type.get("checking")
-        else 0,
-        "card_liabilities": abs(by_type.get("credit_card").balance)
-        if by_type.get("credit_card")
-        else 0,
+        "free_available": (
+            by_type["checking"].balance - expenses
+            if by_type.get("checking") and by_type["checking"].balance_confirmed
+            else None
+        ),
+        "card_liabilities": (
+            abs(by_type["credit_card"].balance)
+            if by_type.get("credit_card") and by_type["credit_card"].balance_confirmed
+            else None
+        ),
         "income": income,
         "expenses": expenses,
         "cashflow": income - expenses,
         "open_reviews": open_reviews,
         "envelopes": envelope_rows,
         "free_vault": free_vault,
+        "vault_balance_confirmed": vault_balance_confirmed,
         "reconciliation": reconciliation,
         "recent_events": recent_events,
         "recurring": recurring,

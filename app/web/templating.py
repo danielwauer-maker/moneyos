@@ -12,4 +12,10 @@ def euro(value: object) -> str:
     return f"{amount:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def account_label(value: object) -> str:
+    label = str(value or "")
+    return "Sparda" if label == "Sparda Girokonto" else label
+
+
 templates.env.filters["euro"] = euro
+templates.env.filters["account_label"] = account_label

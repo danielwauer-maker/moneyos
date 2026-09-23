@@ -9,6 +9,7 @@ from app.db.session import SessionLocal
 from app.services.backup import create_backup, restore_backup
 from app.services.diagnostics import diagnostics_as_dicts
 from app.services.import_staging import delete_staged_file
+from app.services.private_profile import initialize_private_profile
 from app.services.retention import apply_retention, plan_retention
 
 
@@ -21,6 +22,10 @@ def build_parser() -> argparse.ArgumentParser:
     restore.add_argument("--confirm", action="store_true")
     restore.add_argument("--restore-config", action="store_true")
     commands.add_parser("diagnostics", help="Report local operational health")
+    initialize = commands.add_parser(
+        "init-private", help="Initialize private accounts/envelopes and backfill Sparda links"
+    )
+    initialize.add_argument("--confirm", action="store_true")
     retention = commands.add_parser("retention", help="Plan or apply configured retention")
     retention.add_argument("--apply", action="store_true")
     retention.add_argument("--confirm", action="store_true")
@@ -48,6 +53,20 @@ def main() -> None:
     elif args.command == "diagnostics":
         with SessionLocal() as db:
             print(json.dumps(diagnostics_as_dicts(db, settings), indent=2))
+    elif args.command == "init-private":
+        if settings.demo_mode:
+            raise ValueError("init-private requires MONEYOS_DEMO_MODE=false")
+        if not args.confirm:
+            raise ValueError("init-private requires --confirm")
+        backup = create_backup(
+            settings.active_database_url,
+            settings.active_backup_dir,
+            backup_type="safety",
+        )
+        with SessionLocal.begin() as db:
+            result = initialize_private_profile(db, settings)
+        print(f"safety_backup={backup}")
+        print(json.dumps(result.__dict__, indent=2))
     elif args.command == "retention":
         candidates = plan_retention(settings)
         if args.apply:

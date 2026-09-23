@@ -50,6 +50,7 @@ class Account(Base):
     account_type: Mapped[str] = mapped_column(String(30))
     currency: Mapped[str] = mapped_column(String(3), default="EUR")
     balance: Mapped[Decimal] = mapped_column(MONEY, default=Decimal("0"))
+    balance_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_liability: Mapped[bool] = mapped_column(Boolean, default=False)
     parent_account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"))
@@ -122,6 +123,25 @@ class SourceTransaction(Base):
     status: Mapped[str] = mapped_column(String(30), default="booked")
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
+    account_links: Mapped[list[SourceTransactionAccount]] = relationship(
+        back_populates="source_transaction"
+    )
+
+
+class SourceTransactionAccount(Base):
+    __tablename__ = "source_transaction_accounts"
+    __table_args__ = (
+        UniqueConstraint("source_transaction_id", "role"),
+        CheckConstraint("role IN ('source', 'target')", name="ck_source_transaction_account_role"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_transaction_id: Mapped[int] = mapped_column(ForeignKey("source_transactions.id"))
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"))
+    role: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    source_transaction: Mapped[SourceTransaction] = relationship(back_populates="account_links")
+    account: Mapped[Account] = relationship()
 
 
 class Merchant(Base):
@@ -235,6 +255,8 @@ class EconomicEvent(Base):
     amount: Mapped[Decimal] = mapped_column(MONEY)
     currency: Mapped[str] = mapped_column(String(3), default="EUR")
     account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"))
+    source_account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"))
+    target_account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"))
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"))
     envelope_id: Mapped[int | None] = mapped_column(ForeignKey("envelopes.id"))
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"))
@@ -243,7 +265,9 @@ class EconomicEvent(Base):
     is_manual: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-    account: Mapped[Account | None] = relationship()
+    account: Mapped[Account | None] = relationship(foreign_keys=[account_id])
+    source_account: Mapped[Account | None] = relationship(foreign_keys=[source_account_id])
+    target_account: Mapped[Account | None] = relationship(foreign_keys=[target_account_id])
     category: Mapped[Category | None] = relationship()
     envelope: Mapped[Envelope | None] = relationship()
     project: Mapped[Project | None] = relationship()
@@ -327,6 +351,7 @@ class ReviewItem(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime)
     decision_notes: Mapped[str | None] = mapped_column(Text)
     economic_event: Mapped[EconomicEvent | None] = relationship()
+    source_transaction: Mapped[SourceTransaction | None] = relationship()
     proposed_category: Mapped[Category | None] = relationship(foreign_keys=[proposed_category_id])
     proposed_envelope: Mapped[Envelope | None] = relationship(foreign_keys=[proposed_envelope_id])
 

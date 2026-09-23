@@ -116,3 +116,19 @@ der Seite `Import` neu auswählen. MoneyOS validiert und zeigt zunächst eine
 redigierte Vorschau; importiert wird erst nach „Atomaren Import starten“. Eine
 zuvor im Demo-Profil bereitgestellte Datei wird absichtlich nicht profilübergreifend
 übernommen. PayPal-, Amex- und Amazon-Parser bleiben spätere, getrennte Adapter.
+
+Nach dem ersten Sparda-Import werden die bestätigten privaten Konto- und
+Umschlagstammdaten samt additivem Kontobackfill einmalig beziehungsweise beliebig
+oft idempotent angelegt. Die privaten Werte liegen ausschließlich in der von Git
+ignorierten Datei `data/private/profiles/private/master_data.json`:
+
+```powershell
+$env:MONEYOS_DEMO_MODE = "false"
+$env:MONEYOS_PRIVATE_DATABASE_URL = "sqlite:///./data/private/profiles/private/moneyos.db"
+.\.venv\Scripts\alembic.exe upgrade head
+.\.venv\Scripts\python.exe -m app.ops init-private --confirm
+```
+
+Der letzte Befehl legt vor Änderungen automatisch ein privates Safety-Backup an.
+Unbestätigte Salden von Amex, PayPal, Portemonnaie, Tresor und C24 bleiben sichtbar
+als „Nicht abgestimmt“ und werden nicht als 0 Euro erfunden.

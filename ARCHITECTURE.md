@@ -38,6 +38,17 @@ von `data/private/profiles/private/`. Produktive Sparda-Imports sind im
 Demo-Profil auf Service- und HTTP-Ebene gesperrt. Der Demo-Seed beendet sich im
 Privat-Profil ohne Schreibzugriff.
 
+`python -m app.ops init-private --confirm` initialisiert ausschließlich im
+Privat-Profil die bestätigten Konto- und Umschlagstammdaten. Der Befehl erzeugt
+vor jedem Lauf automatisch ein Safety-Backup und ist idempotent. Bestehende
+Sparda-Source-Transactions werden nicht verändert: Eine additive
+`source_transaction_accounts`-Verknüpfung ordnet sie dem Girokonto zu. Mutable
+Economic Events erhalten das Primärkonto und Transfers zusätzlich explizite
+Quell-/Zielkonten, soweit die bereits gespeicherte Importsemantik eindeutig ist.
+Private Namen, Salden und Beitragsbeträge liest der Service aus der ignorierten
+Datei `data/private/profiles/private/master_data.json`; sie sind keine
+Quellcode-Konstanten und werden nicht mit Git versioniert.
+
 `app/services/import_staging.py` übernimmt Streaming, SHA-256, unveränderte lokale
 Ablage, Dateityp-/Inhaltsprüfung und Quarantäne. Erst ein Batch im Zustand `valid`
 darf an `app/services/import_execution.py` übergeben werden. Der spätere Parser-

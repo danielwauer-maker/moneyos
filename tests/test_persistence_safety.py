@@ -100,7 +100,7 @@ def test_migration_reaches_head_with_expected_schema(migrated_engine: object) ->
     assert "envelope_assignment_decisions" in schema.get_table_names()
     assert "category_assignment_decisions" in schema.get_table_names()
     with migrated_engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260924_0008"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260924_0009"
 
 
 def test_raw_and_source_records_are_append_only_in_orm_and_database(

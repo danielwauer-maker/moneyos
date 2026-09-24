@@ -211,3 +211,13 @@ Der ausschließlich lesende Detail-Audit für das Privatprofil lautet:
 $env:MONEYOS_DEMO_MODE = "false"
 .\.venv\Scripts\python.exe -m app.ops audit-sparda-details
 ```
+
+### Chronologische Prüfung und Projekte
+
+Für systematische private Zuordnung steht `/transaction-review` zur Verfügung.
+Die Ansicht sortiert importierte Vorgänge nach Datum und erlaubt unabhängige
+Entscheidungen für wirtschaftlichen Typ, Kategorie, Umschlag und Projekt.
+`/review` bleibt die Ausnahme-Inbox. Projekte können unter `/projects` angelegt,
+umbenannt, archiviert und reaktiviert werden; sie besitzen bewusst noch kein
+eigenes Budget. Explizite Entscheidungen sind idempotent und verändern keine
+Raw Records oder Source Transactions.

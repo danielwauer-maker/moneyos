@@ -132,3 +132,12 @@ Geräteverschlüsselung für das Laufwerk, ein geschütztes lokales OS-Konto und
 privates, nur für dieses Konto lesbares MoneyOS-Datenverzeichnis. Backups gehören
 auf ein getrenntes, ebenfalls verschlüsseltes lokales Ziel. Es gibt weder Cloud-
 Key-Management noch externe Datendienste.
+
+## Phase 2B.8 review dimensions
+
+The `/review` inbox remains the exception queue. `/transaction-review` is the
+chronological private bookkeeping workspace. It reads immutable source rows and
+existing events, while explicit type, category, envelope and project decisions
+are stored independently. A type decision on a review-only source creates one
+canonical Economic Event through the domain service; repeating the decision is
+idempotent. Project decisions never affect balances or envelope actuals.

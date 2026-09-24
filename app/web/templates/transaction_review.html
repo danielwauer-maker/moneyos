@@ -1,0 +1,43 @@
+{% extends "base.html" %}{% block content %}
+{% macro category_options(selected='') -%}
+  <option value="">Unverändert</option>
+  {% for category in categories if not category.parent_id %}
+    <option value="{{ category.id }}" {% if selected == category.id %}selected{% endif %}>{{ category.name }}</option>
+    {% for child in categories if child.parent_id == category.id %}<option value="{{ child.id }}" {% if selected == child.id %}selected{% endif %}>{{ category.name }} → {{ child.name }}</option>{% endfor %}
+  {% endfor %}
+{%- endmacro %}
+<div class="intro"><div><h2>Chronologische Transaktionsprüfung</h2><p>Typ, Kategorie, Umschlag und Projekt werden unabhängig und ausdrücklich entschieden.</p></div><a class="secondary-button" href="/review">Zur Review-Inbox</a></div>
+<div class="stats-grid">
+  <article class="stat-card"><small>Transaktionen</small><strong>{{ progress.total }}</strong></article>
+  <article class="stat-card"><small>Vollständig geprüft</small><strong>{{ progress.fully_reviewed }}</strong></article>
+  <article class="stat-card"><small>Typ offen</small><strong>{{ progress.type_unresolved }}</strong></article>
+  <article class="stat-card"><small>Kategorie offen</small><strong>{{ progress.category_unresolved }}</strong></article>
+  <article class="stat-card"><small>Umschlag offen</small><strong>{{ progress.envelope_unresolved }}</strong></article>
+  <article class="stat-card"><small>Projekt offen</small><strong>{{ progress.project_unresolved }}</strong></article>
+</div>
+<article class="panel"><form method="get" class="upload-form">
+  <label>Von <input type="date" name="date_from" value="{{ filters.get('date_from','') }}"></label><label>Bis <input type="date" name="date_to" value="{{ filters.get('date_to','') }}"></label><label>Monat <input type="month" name="month" value="{{ filters.get('month','') }}"></label><label>Händler <input type="search" name="merchant" value="{{ filters.get('merchant','') }}"></label>
+  <label>Konto <select name="account"><option value="">Alle Konten</option>{% for item in accounts %}<option value="{{ item.id }}" {% if filters.get('account') == item.id|string %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+  <label>Typ <select name="economic_type"><option value="">Alle</option>{% for value,label in [('expense','Ausgabe'),('income','Einnahme'),('refund','Refund'),('transfer','Transfer'),('review','Offen')] %}<option value="{{ value }}" {% if filters.get('economic_type') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+  <label>Kategorie <select name="category"><option value="">Alle Kategorien</option>{% for item in categories %}<option value="{{ item.id }}" {% if filters.get('category') == item.id|string %}selected{% endif %}>{{ item.parent.name ~ ' → ' if item.parent else '' }}{{ item.name }}</option>{% endfor %}</select></label>
+  <label>Umschlag <select name="envelope"><option value="">Alle Umschläge</option>{% for item in envelopes %}<option value="{{ item.id }}" {% if filters.get('envelope') == item.id|string %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+  <label>Projekt <select name="project"><option value="">Alle Projekte</option>{% for item in projects %}<option value="{{ item.id }}" {% if filters.get('project') == item.id|string %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+  <label>Sortierung <select name="sort"><option value="newest">Neueste zuerst</option><option value="oldest" {% if filters.get('sort') == 'oldest' %}selected{% endif %}>Älteste zuerst</option></select></label><label><input type="checkbox" name="unresolved" value="true" {% if filters.get('unresolved') == 'true' %}checked{% endif %}> Nur offene</label><button class="secondary-button" type="submit">Filtern</button>
+</form></article>
+
+<form id="bulk-review" action="/transaction-review/decide" method="post" class="panel upload-form"><input type="hidden" name="return_to" value="/transaction-review?{{ request.url.query }}"><strong>Auswahl bearbeiten</strong><label>Typ <select name="economic_type"><option value="">Unverändert</option><option value="expense">Ausgabe</option><option value="income">Einnahme</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select></label><label>Kategorie <select name="category_id">{{ category_options() }}</select></label><label>Umschlag <select name="envelope_id"><option value="">Unverändert</option>{% for item in envelopes %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}</select></label><label>Projekt <select name="project_id"><option value="">Unverändert</option>{% for item in projects %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}</select></label><label><input type="checkbox" name="create_rule" value="true"> Vorschlagsregel aus konsistenter Auswahl erstellen</label><button class="secondary-button" name="envelope_decision" value="no_envelope">Kein Umschlag</button><button class="secondary-button" name="project_decision" value="no_project">Kein Projekt</button><button class="secondary-button" name="project_decision" value="later">Später prüfen</button><button class="primary-button" type="submit">Auswahl speichern</button></form>
+
+<article class="panel table-panel"><table><thead><tr><th></th><th>Datum</th><th>Zahlungspartner / Detail</th><th>Betrag</th><th>Konto</th><th>Typ</th><th>Kategorie</th><th>Umschlag</th><th>Projekt</th><th>Status</th><th>Aktion</th></tr></thead><tbody>
+{% for row in rows %}{% set form_id = 'review-row-' ~ loop.index %}<tr>
+  <td><input form="bulk-review" type="checkbox" name="candidate_keys" value="{{ row.key }}" aria-label="{{ row.raw_counterparty }} auswählen"><form id="{{ form_id }}" action="/transaction-review/decide" method="post"><input type="hidden" name="candidate_keys" value="{{ row.key }}"><input type="hidden" name="return_to" value="/transaction-review?{{ request.url.query }}"></form></td>
+  <td>{{ row.booked_at.strftime('%d.%m.%Y') }}</td>
+  <td><strong>{{ row.raw_counterparty }}</strong>{% if row.secondary_detail %}<br><small class="transaction-detail">{{ row.secondary_detail }}</small>{% endif %}{% if row.canonical_merchant != row.raw_counterparty %}<br><span class="merchant-hint">Erkannt: {{ row.canonical_merchant }}</span>{% endif %}</td>
+  <td class="amount {% if row.economic_type == 'expense' %}red{% elif row.economic_type in ['income','refund'] %}green{% endif %}">{{ '-' if row.economic_type == 'expense' else ('+' if row.economic_type in ['income','refund'] else '') }}{{ row.amount|euro }}</td><td>{{ row.account.name if row.account else 'Nicht zugeordnet' }}</td>
+  <td><select form="{{ form_id }}" name="economic_type"><option value="">{{ row.economic_type }}{% if row.proposed_type %} · Vorschlag {{ row.proposed_type }}{% endif %}</option><option value="expense">Ausgabe</option><option value="income">Einnahme</option><option value="refund">Refund</option><option value="transfer">Transfer</option></select></td>
+  <td><select form="{{ form_id }}" name="category_id">{{ category_options(row.category.id if row.category else '') }}</select><br><small>{{ row.category.name if row.category else ('Vorschlag: ' ~ row.proposed_category.name if row.proposed_category else 'Offen') }}</small></td>
+  <td><select form="{{ form_id }}" name="envelope_id"><option value="">Unverändert</option>{% for item in envelopes %}<option value="{{ item.id }}" {% if row.envelope and row.envelope.id == item.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select><button form="{{ form_id }}" class="text-button" name="envelope_decision" value="no_envelope">Kein Umschlag</button><br><small>{{ row.envelope.name if row.envelope else ('Vorschlag: ' ~ row.proposed_envelope.name if row.proposed_envelope else 'Offen') }}</small></td>
+  <td><select form="{{ form_id }}" name="project_id"><option value="">Unverändert</option>{% for item in projects %}<option value="{{ item.id }}" {% if row.project and row.project.id == item.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select><button form="{{ form_id }}" class="text-button" name="project_decision" value="no_project">Kein Projekt</button><br><small>{{ row.project.name if row.project else ('Vorschlag: ' ~ row.proposed_project.name if row.proposed_project else 'Offen') }}</small></td>
+  <td><span class="badge {% if row.fully_reviewed %}success{% else %}warning{% endif %}">{{ row.status }}</span></td><td><button form="{{ form_id }}" class="primary-button" type="submit">Speichern</button></td>
+</tr>{% else %}<tr><td colspan="11">Keine Transaktionen für diesen Filter.</td></tr>{% endfor %}
+</tbody></table></article>
+{% endblock %}

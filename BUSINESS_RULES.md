@@ -75,3 +75,11 @@ Hohe Confidence darf ein bestehendes Economic Event nur ohne bestätigte manuell
 Kategorieentscheidung aktualisieren. Mittlere Confidence erzeugt nur einen
 Vorschlag. Review-only-Quellen erhalten ebenfalls nur Vorschläge und niemals ein
 geratenes Economic Event.
+
+## Chronologische Review und Projekte
+
+Projekt, Kategorie und Umschlag sind unabhängige Dimensionen. `Kein Projekt`
+und `Kein Umschlag` sind aufgelöste Entscheidungen; `Später prüfen` bleibt
+offen. Eine explizite wirtschaftliche Typentscheidung für eine Review-only
+Source Transaction erzeugt höchstens ein verknüpftes Economic Event. Die
+unveränderlichen Raw Records und Source Transactions bleiben unangetastet.

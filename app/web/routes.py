@@ -1,15 +1,17 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.config import get_settings
 from app.db.models import (
     Account,
+    Category,
     EconomicEvent,
+    Envelope,
     ImportBatch,
     Project,
     RawImportRecord,
@@ -47,6 +49,11 @@ from app.services.envelope_assignments import (
 from app.services.import_staging import batch_file_path, stage_upload
 from app.services.reviews import build_review_view
 from app.services.transaction_details import event_transaction_views
+from app.services.transaction_review import (
+    apply_transaction_decision,
+    build_transaction_review,
+    create_project,
+)
 from app.web.templating import templates
 
 router = APIRouter()
@@ -387,7 +394,183 @@ def planning(request: Request) -> HTMLResponse:
 @router.get("/projects", response_class=HTMLResponse)
 def projects(request: Request, db: DbSession) -> HTMLResponse:
     rows = list(db.scalars(select(Project).order_by(Project.name)))
-    return render(request, "projects.html", active="projects", page_title="Projekte", projects=rows)
+    project_stats = {
+        project.id: {
+            "count": db.scalar(
+                select(func.count(EconomicEvent.id)).where(EconomicEvent.project_id == project.id)
+            )
+            or 0,
+            "expenses": db.scalar(
+                select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
+                    EconomicEvent.project_id == project.id, EconomicEvent.event_type == "expense"
+                )
+            )
+            or 0,
+            "refunds": db.scalar(
+                select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
+                    EconomicEvent.project_id == project.id, EconomicEvent.event_type == "refund"
+                )
+            )
+            or 0,
+            "first": db.scalar(
+                select(func.min(EconomicEvent.occurred_at)).where(
+                    EconomicEvent.project_id == project.id
+                )
+            ),
+            "last": db.scalar(
+                select(func.max(EconomicEvent.occurred_at)).where(
+                    EconomicEvent.project_id == project.id
+                )
+            ),
+        }
+        for project in rows
+    }
+    return render(
+        request,
+        "projects.html",
+        active="projects",
+        page_title="Projekte",
+        projects=rows,
+        project_stats=project_stats,
+    )
+
+
+@router.post("/projects")
+def add_project(
+    db: DbSession,
+    name: Annotated[str, Form()],
+    starts_at: Annotated[str | None, Form()] = None,
+    ends_at: Annotated[str | None, Form()] = None,
+    notes: Annotated[str | None, Form()] = None,
+) -> RedirectResponse:
+    try:
+        create_project(
+            db,
+            name=name,
+            starts_at=date.fromisoformat(starts_at) if starts_at else None,
+            ends_at=date.fromisoformat(ends_at) if ends_at else None,
+            notes=notes,
+        )
+        db.commit()
+    except (ValueError, OverflowError) as exc:
+        db.rollback()
+        return RedirectResponse(f"/projects?error={str(exc)}", status_code=303)
+    return RedirectResponse("/projects", status_code=303)
+
+
+@router.post("/projects/{project_id}/status")
+def project_status(
+    project_id: int, db: DbSession, active: Annotated[bool, Form()] = True
+) -> RedirectResponse:
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project.status = "active" if active else "archived"
+    db.commit()
+    return RedirectResponse("/projects", status_code=303)
+
+
+@router.post("/projects/{project_id}/rename")
+def project_rename(
+    project_id: int, db: DbSession, name: Annotated[str, Form()]
+) -> RedirectResponse:
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    clean = " ".join(name.split())
+    if not clean:
+        return RedirectResponse("/projects?error=Projektname+leer", status_code=303)
+    duplicate = db.scalar(
+        select(Project).where(Project.id != project_id, Project.name.ilike(clean))
+    )
+    if duplicate is not None:
+        return RedirectResponse("/projects?error=Projekt+existiert+bereits", status_code=303)
+    project.name = clean
+    db.commit()
+    return RedirectResponse("/projects", status_code=303)
+
+
+@router.get("/transaction-review", response_class=HTMLResponse)
+def transaction_review(request: Request, db: DbSession) -> HTMLResponse:
+    params = request.query_params
+
+    def optional_int(name: str) -> int | None:
+        value = params.get(name)
+        return int(value) if value else None
+
+    rows, progress = build_transaction_review(
+        db,
+        sort=params.get("sort", "newest"),
+        month=params.get("month"),
+        date_from=params.get("date_from"),
+        date_to=params.get("date_to"),
+        merchant=params.get("merchant"),
+        economic_type=params.get("economic_type"),
+        account_id=optional_int("account"),
+        category_id=optional_int("category"),
+        envelope_id=optional_int("envelope"),
+        project_id=optional_int("project"),
+        unresolved_only=params.get("unresolved") == "true",
+    )
+    return render(
+        request,
+        "transaction_review.html",
+        active="transaction_review",
+        page_title="Transaktionsprüfung",
+        rows=rows,
+        progress=progress,
+        projects=list(
+            db.scalars(select(Project).where(Project.status == "active").order_by(Project.name))
+        ),
+        accounts=list(db.scalars(select(Account).where(Account.is_active).order_by(Account.name))),
+        categories=list(
+            db.scalars(select(Category).where(Category.is_active).order_by(Category.name))
+        ),
+        envelopes=list(
+            db.scalars(select(Envelope).where(Envelope.is_active).order_by(Envelope.sort_order))
+        ),
+        filters=params,
+    )
+
+
+@router.post("/transaction-review/decide")
+def decide_transaction_review(
+    db: DbSession,
+    candidate_keys: Annotated[list[str], Form()],
+    economic_type: Annotated[str | None, Form()] = None,
+    category_id: Annotated[int | None, Form()] = None,
+    envelope_decision: Annotated[str | None, Form()] = None,
+    envelope_id: Annotated[int | None, Form()] = None,
+    project_decision: Annotated[str | None, Form()] = None,
+    project_id: Annotated[int | None, Form()] = None,
+    create_rule: Annotated[bool, Form()] = False,
+    return_to: Annotated[str | None, Form()] = None,
+) -> RedirectResponse:
+    try:
+        if envelope_id is not None and envelope_decision is None:
+            envelope_decision = "assigned"
+        if project_id is not None and project_decision is None:
+            project_decision = "assigned"
+        apply_transaction_decision(
+            db,
+            candidate_keys=candidate_keys,
+            economic_type=economic_type,
+            category_id=category_id,
+            envelope_decision=envelope_decision,
+            envelope_id=envelope_id,
+            project_decision=project_decision,
+            project_id=project_id,
+            create_rule=create_rule,
+        )
+        db.commit()
+    except ValueError:
+        db.rollback()
+    return RedirectResponse(
+        return_to
+        if return_to and (return_to.startswith("/transaction-review") or return_to == "/review")
+        else "/transaction-review",
+        status_code=303,
+    )
 
 
 @router.get("/categories", response_class=HTMLResponse)
@@ -462,6 +645,7 @@ def review(request: Request, db: DbSession) -> HTMLResponse:
                 selectinload(ReviewItem.economic_event),
                 selectinload(ReviewItem.proposed_category),
                 selectinload(ReviewItem.proposed_envelope),
+                selectinload(ReviewItem.proposed_project),
                 selectinload(ReviewItem.source_transaction)
                 .selectinload(SourceTransaction.account_links)
                 .selectinload(SourceTransactionAccount.account),
@@ -492,6 +676,15 @@ def review(request: Request, db: DbSession) -> HTMLResponse:
             )
             for row in rows
         ],
+        categories=list(
+            db.scalars(select(Category).where(Category.is_active).order_by(Category.name))
+        ),
+        envelopes=list(
+            db.scalars(select(Envelope).where(Envelope.is_active).order_by(Envelope.sort_order))
+        ),
+        projects=list(
+            db.scalars(select(Project).where(Project.status == "active").order_by(Project.name))
+        ),
     )
 
 

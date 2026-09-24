@@ -27,6 +27,7 @@ class ReviewView:
     proposed_type: str
     proposed_category: str
     proposed_envelope: str
+    proposed_project: str
 
 
 def build_review_view(review: ReviewItem, raw: RawImportRecord | None = None) -> ReviewView:
@@ -65,4 +66,5 @@ def build_review_view(review: ReviewItem, raw: RawImportRecord | None = None) ->
         proposed_type=proposed_label,
         proposed_category=category_label,
         proposed_envelope=(review.proposed_envelope.name if review.proposed_envelope else "Keiner"),
+        proposed_project=(review.proposed_project.name if review.proposed_project else "Keines"),
     )

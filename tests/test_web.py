@@ -33,6 +33,7 @@ def test_all_main_pages_are_reachable() -> None:
                 "/projects",
                 "/categories",
                 "/review",
+                "/transaction-review",
                 "/import",
                 "/diagnostics",
                 "/settings",

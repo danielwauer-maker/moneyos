@@ -401,6 +401,7 @@ class ReviewItem(Base):
     source_transaction: Mapped[SourceTransaction | None] = relationship()
     proposed_category: Mapped[Category | None] = relationship(foreign_keys=[proposed_category_id])
     proposed_envelope: Mapped[Envelope | None] = relationship(foreign_keys=[proposed_envelope_id])
+    proposed_project: Mapped[Project | None] = relationship(foreign_keys=[proposed_project_id])
 
 
 class AssignmentRule(Base):
@@ -476,6 +477,64 @@ class CategoryAssignmentDecision(Base):
     economic_event: Mapped[EconomicEvent | None] = relationship()
     category: Mapped[Category] = relationship()
     assignment_rule: Mapped[AssignmentRule | None] = relationship()
+
+
+class ProjectAssignmentDecision(Base):
+    """Independent, explicit project decision for a review candidate."""
+
+    __tablename__ = "project_assignment_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('assigned','no_project','later')",
+            name="ck_project_assignment_decision",
+        ),
+        CheckConstraint(
+            "(decision = 'assigned' AND project_id IS NOT NULL) OR "
+            "(decision != 'assigned' AND project_id IS NULL)",
+            name="ck_project_assignment_target",
+        ),
+        CheckConstraint(
+            "source_transaction_id IS NOT NULL OR economic_event_id IS NOT NULL",
+            name="ck_project_assignment_source",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_key: Mapped[str] = mapped_column(String(80), unique=True)
+    source_transaction_id: Mapped[int | None] = mapped_column(ForeignKey("source_transactions.id"))
+    economic_event_id: Mapped[int | None] = mapped_column(ForeignKey("economic_events.id"))
+    decision: Mapped[str] = mapped_column(String(20))
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"))
+    assignment_rule_id: Mapped[int | None] = mapped_column(ForeignKey("assignment_rules.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    project: Mapped[Project | None] = relationship()
+
+
+class EconomicTypeAssignmentDecision(Base):
+    """Explicit type confirmation, including review-only rows without an event."""
+
+    __tablename__ = "economic_type_assignment_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('expense','income','transfer','refund','later')",
+            name="ck_type_assignment_decision",
+        ),
+        CheckConstraint(
+            "source_transaction_id IS NOT NULL OR economic_event_id IS NOT NULL",
+            name="ck_type_assignment_source",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_key: Mapped[str] = mapped_column(String(80), unique=True)
+    source_transaction_id: Mapped[int | None] = mapped_column(ForeignKey("source_transactions.id"))
+    economic_event_id: Mapped[int | None] = mapped_column(ForeignKey("economic_events.id"))
+    decision: Mapped[str] = mapped_column(String(20))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class ReconciliationRun(Base):

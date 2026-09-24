@@ -47,3 +47,9 @@
   color: var(--ink);
   font-weight: 400;
 }
+
+.review-amount {
+  margin-top: 12px;
+  font-size: 24px;
+  font-weight: 700;
+}

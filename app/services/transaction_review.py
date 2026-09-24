@@ -233,6 +233,12 @@ def _load_rows(db: Session) -> list[TransactionReviewRow]:
             and review is None
         ):
             continue
+        if (
+            source.source_system == "amex"
+            and (source.metadata_json or {}).get("amex_semantic") == "statement_payment"
+            and review is None
+        ):
+            continue
         detail = derive_transaction_detail(
             source, None, fallback=event.description if event else source.description_raw
         )

@@ -20,7 +20,7 @@ ALLOWED_EXTENSIONS: dict[str, frozenset[str]] = {
     "sparda": frozenset({".csv"}),
     "bank": frozenset({".csv"}),
     "paypal": frozenset({".csv"}),
-    "amex": frozenset({".csv", ".pdf"}),
+    "amex": frozenset({".csv"}),
     "amazon": frozenset({".csv", ".json", ".zip"}),
 }
 SUSPICIOUS_ZIP_SUFFIXES = frozenset(
@@ -235,6 +235,13 @@ def stage_upload(
             try:
                 parse_paypal_csv(staged_path)
             except PayPalFormatError as exc:
+                issues.append(ValidationIssue(exc.code, exc.message))
+        elif source_type == "amex" and not issues:
+            from app.importers.amex import AmexFormatError, parse_amex_csv
+
+            try:
+                parse_amex_csv(staged_path)
+            except AmexFormatError as exc:
                 issues.append(ValidationIssue(exc.code, exc.message))
 
         if issues:

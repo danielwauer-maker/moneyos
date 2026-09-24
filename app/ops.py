@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.db.session import SessionLocal
+from app.importers.amex import dry_run_amex_file
 from app.importers.paypal import dry_run_paypal_file
 from app.services.backup import create_backup, restore_backup
 from app.services.balance_confirmations import backfill_sparda_imported_balance
@@ -58,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read-only structural and matching audit of a local PayPal CSV",
     )
     paypal_audit.add_argument("file", type=Path)
+    amex_audit = commands.add_parser(
+        "audit-amex",
+        help="Read-only structural and settlement audit of a local Amex CSV",
+    )
+    amex_audit.add_argument("file", type=Path)
     return parser
 
 
@@ -148,6 +154,12 @@ def main() -> None:
             raise ValueError("audit-paypal requires MONEYOS_DEMO_MODE=false")
         with SessionLocal() as db:
             report = dry_run_paypal_file(args.file, db)
+        print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
+    elif args.command == "audit-amex":
+        if settings.demo_mode:
+            raise ValueError("audit-amex requires MONEYOS_DEMO_MODE=false")
+        with SessionLocal() as db:
+            report = dry_run_amex_file(args.file, db)
         print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
 
 

@@ -156,3 +156,14 @@ action. The lightweight partial-response endpoint renders one table row rather
 than the full page. Review completion is derived only from explicit decisions
 for all four dimensions; existing event values and suggestions remain visibly
 open until confirmed. No migration or background reclassification is involved.
+
+## Phase 2D American Express
+
+The Amex adapter stores immutable raw and normalized sources while keeping card
+purchases, refunds and statement settlements as distinct semantics. Purchase,
+refund and explicit fee rows may own a canonical Economic Event. A statement
+payment never does: a high-confidence match adds the Amex source as a
+`settlement_leg` to the existing Sparda transfer event. Medium or unresolved
+matches create review items only. Original-currency facts remain Source
+Transaction metadata, and balance confirmations remain the sole authority for
+the current reconciled card liability.

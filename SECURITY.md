@@ -8,7 +8,7 @@ Uploads zu Drittdiensten.
 ## Demo-/Privat-Trennung
 
 Das Demo-Profil (`MONEYOS_DEMO_MODE=true`) nutzt `data/moneyos.db`; produktive
-Sparda- und PayPal-Imports sind dort hart gesperrt. Das Privat-Profil
+Sparda-, PayPal- und American-Express-Imports sind dort hart gesperrt. Das Privat-Profil
 (`MONEYOS_DEMO_MODE=false`) nutzt standardmäßig die eigene Datenbank
 `data/private/profiles/private/moneyos.db`, eigene Staging-/Quarantäneverzeichnisse
 unter `data/private/profiles/private/imports/`, Backups unter `backups/private/`
@@ -90,3 +90,12 @@ Die konservativen Defaults sind: Staging 90 Tage, Quarantäne 365 Tage, Logs 30
 Tage und Backups 365 Tage; mindestens drei neueste Backups bleiben geschützt.
 Retention ist explizit, zeigt standardmäßig nur Kandidaten und löscht ausschließlich
 mit `--apply --confirm`. Sie löscht niemals das einzige Backup.
+
+# American Express imports
+
+Only synthetic Amex fixtures belong in Git. Real exports remain below the
+ignored private data directories or another protected local folder. The preview
+redacts card-number-shaped data and other identifiers; full card numbers are
+redacted before persistence even inside protected raw rows. A private safety
+backup is created immediately before productive Amex execution. The read-only
+`audit-amex` command neither stages a file nor creates an Import Batch.

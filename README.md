@@ -5,8 +5,9 @@ Alembic und Jinja2; die Templates sind für lokale HTMX-Interaktionen vorbereite
 Phase 2A ergänzt ein privates lokales Datei-Staging, Validierung und Quarantäne,
 atomare Importgrenzen, Backups/Restore, Aufbewahrungsregeln und eine Diagnose.
 Phase 2B enthält den produktiven Sparda-CSV-Adapter; Phase 2C ergänzt den
-produktiven PayPal-CSV-Adapter mit konservativem Sparda-Funding-Matching. Amex-
-und Amazon-Parser sind bewusst noch nicht enthalten.
+produktiven PayPal-CSV-Adapter mit konservativem Sparda-Funding-Matching.
+Phase 2D ergänzt American-Express-CSV mit konservativem Settlement-Matching.
+Ein Amazon-Parser ist bewusst noch nicht enthalten.
 
 ## Voraussetzungen
 
@@ -232,3 +233,20 @@ Zeilen wechseln sofort von `Offene Transaktionen` in den eingeklappten Bereich
 `Bereits geprüft`. Vorhandene oder vorgeschlagene Werte gelten dabei nicht als
 Bestätigung; auch `Kein Umschlag` und `Kein Projekt` müssen ausdrücklich gewählt
 werden.
+
+### American Express
+
+American-Express-CSV werden über dieselbe lokale Staging-, Vorschau- und atomare
+Importgrenze verarbeitet. Händlerkäufe und explizite Gebühren erzeugen Ausgaben,
+Händlergutschriften Refunds. Abrechnungszahlungen erzeugen keine Ausgabe. Ein
+hochsicherer Betrag-/Datums-/Referenztreffer wird als additiver Settlement-Link
+an den vorhandenen Sparda-Transfer gehängt; mittlere und ungeklärte Treffer
+bleiben in der Prüfung. Historische Kartenumsätze verändern keine bestätigte
+aktuelle Kartenverbindlichkeit.
+
+Ein ausschließlich lesender Audit einer lokalen CSV lautet:
+
+```powershell
+$env:MONEYOS_DEMO_MODE = "false"
+.\.venv\Scripts\python.exe -m app.ops audit-amex "C:\Pfad\Umsaetze.csv"
+```

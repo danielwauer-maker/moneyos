@@ -13,12 +13,12 @@
     <article><span>3</span><small>Ereignisse</small><strong>{{ result.economic_events_created }}</strong></article>
     <article><span>4</span><small>Reviews</small><strong>{{ result.review_items }}</strong></article>
   </div>
-  <p>Neue Raw Records {{ result.new_raw_records }} · Transfers {{ result.transfers }} · Ausgaben {{ result.expenses }} · Einnahmen {{ result.income }} · Refunds {{ result.refunds }} · Duplikatzeilen {{ result.duplicate_rows }} · Dateiduplikate {{ 1 if duplicate else result.duplicate_files }} · Fehlzeilen {{ result.failed_rows }}</p>
+  <p>Neue Raw Records {{ result.get('new_raw_records', 0) }} · Transfers {{ result.get('transfers', 0) }} · Ausgaben {{ result.get('expenses', 0) }} · Einnahmen {{ result.get('income', 0) }} · Refunds {{ result.get('refunds', 0) }} · Duplikatzeilen {{ result.get('duplicate_rows', 0) }} · Dateiduplikate {{ 1 if duplicate else result.get('duplicate_files', 0) }} · Fehlzeilen {{ result.get('failed_rows', 0) }}</p>
 </article>
 {% endif %}
 <article class="panel">
   <h3>Lokales Import-Staging</h3>
-  <p>Sparda- und PayPal-CSV sind produktiv mit redaktierter Vorschau und atomarem Import. Amex- und Amazon-Dateien werden weiterhin nur sicher bereitgestellt.</p>
+  <p>Sparda-, PayPal- und American-Express-CSV sind produktiv mit redaktierter Vorschau und atomarem Import. Amazon-Dateien werden weiterhin nur sicher bereitgestellt.</p>
   <form action="/import/stage" method="post" enctype="multipart/form-data" class="upload-form">
     <label>Quelle <select name="source_type" required><option value="sparda">Sparda</option><option value="paypal">PayPal</option><option value="amex">American Express</option><option value="amazon">Amazon</option></select></label>
     <label>Datei <input name="upload" type="file" required></label>
@@ -34,7 +34,7 @@
   <td>#{{ batch.id }}</td><td>{{ batch.source_type }}</td><td><span class="badge {% if batch.status == 'valid' or batch.status == 'imported' %}success{% elif batch.status == 'quarantined' or batch.status == 'failed' %}warning{% else %}neutral{% endif %}">{{ batch.status }}</span></td><td>{{ batch.size_bytes or 0 }} Byte</td>
   <td>
     {% if batch.status == 'imported' %}<span class="badge success">Import erfolgreich</span> · <a href="/import?batch_id={{ batch.id }}">Zusammenfassung</a>
-    {% else %}{% for issue in (batch.validation_json or {}).get('issues', []) %}{{ issue.code }}{% if not loop.last %}, {% endif %}{% else %}{% if batch.source_type in ['sparda','paypal'] and batch.status in ['valid','failed'] %}<a href="/import/{{ batch.id }}/preview">Vorschau</a>{% else %}–{% endif %}{% endfor %}{% endif %}
+    {% else %}{% for issue in (batch.validation_json or {}).get('issues', []) %}{{ issue.code }}{% if not loop.last %}, {% endif %}{% else %}{% if batch.source_type in ['sparda','paypal','amex'] and batch.status in ['valid','failed'] %}<a href="/import/{{ batch.id }}/preview">Vorschau</a>{% else %}–{% endif %}{% endfor %}{% endif %}
   </td>
   <td>{% if history %}Historische Fehler: {{ history|length }}{% else %}–{% endif %}</td>
 </tr>

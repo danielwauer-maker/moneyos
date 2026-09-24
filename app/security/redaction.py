@@ -36,6 +36,11 @@ def redact_text(value: object) -> str:
     return CARD_RE.sub(REDACTED, text)
 
 
+def redact_card_numbers(value: object) -> str:
+    """Redact complete card-number-shaped values while retaining other audit text."""
+    return CARD_RE.sub(REDACTED, str(value))
+
+
 def redact_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, item in value.items():

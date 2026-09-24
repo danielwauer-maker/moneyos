@@ -1,8 +1,8 @@
 # Importe
 
-Phase 2A stellt die sichere lokale Importgrenze bereit. Sparda CSV und PayPal CSV
-besitzen produktive Adapter. Amex CSV/PDF und Amazon-Daten werden weiterhin nur
-bereitgestellt und validiert; für sie existieren keine produktiven Parser.
+Phase 2A stellt die sichere lokale Importgrenze bereit. Sparda-, PayPal- und
+American-Express-CSV besitzen produktive Adapter. Amazon-Daten werden weiterhin
+nur bereitgestellt und validiert; für sie existiert kein produktiver Parser.
 
 ## Staging und Validierung
 
@@ -27,7 +27,7 @@ Unterstützte Staging-Formate:
 
 - Sparda/Bank: `.csv` (produktiv)
 - PayPal: `.csv` (produktiv)
-- American Express: `.csv`, `.pdf`
+- American Express: `.csv` (produktiv; PDF wird nicht importiert)
 - Amazon: `.csv`, `.json`, `.zip`
 
 Die Maximalgröße wird mit `MONEYOS_MAX_IMPORT_FILE_SIZE_BYTES` konfiguriert. Leere,
@@ -165,3 +165,23 @@ Mindestens die konfigurierten neuesten Backups und immer wenigstens ein Backup
 bleiben geschützt. Eine einzelne Staging-/Quarantänedatei wird mit
 `python -m app.ops delete-staged BATCH_ID --confirm` entfernt; der technische
 Batch-Nachweis bleibt erhalten.
+
+# American Express CSV
+
+American Express uses the hardened upload → hash → validation → preview → atomic
+execute lifecycle. Productive parsing accepts UTF-8 CSV (with or without BOM)
+and comma, semicolon or tab delimiters. Required logical columns are booking
+date, description and booked amount; German and English header aliases and
+flexible column order are supported. PDF statements are not productive import
+sources and are rejected cleanly.
+
+Row identity is based on a source-scoped deterministic fingerprint over stable
+row fields plus a stable occurrence number; a transaction/reference identifier
+is never assumed unique. Full card-number-shaped values are redacted before any
+raw or normalized row is persisted. Foreign amount, currency and supplied
+exchange rate are retained without deriving a missing rate.
+
+Statement payments are clearing movements, not merchant expenses. High-
+confidence Sparda matches create only an additive `settlement_leg`; medium and
+unmatched settlements create review items. Failed batches roll back all business
+rows and can be retried, while completed file hashes remain duplicate-protected.

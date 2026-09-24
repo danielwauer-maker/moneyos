@@ -36,6 +36,16 @@ def derive_transaction_detail(
         safe = redact_text(fallback)[:160]
         return TransactionDetail(safe, None, "", safe, "unknown", "Keine Quelltransaktion")
     raw_counterparty = redact_text(source.merchant_raw or fallback)[:160]
+    if source.source_system == "amex":
+        canonical = (source.metadata_json or {}).get("canonical_merchant") or raw_counterparty
+        return TransactionDetail(
+            raw_counterparty=raw_counterparty,
+            processor=None,
+            secondary_detail=redact_text(source.description_raw or "")[:240],
+            canonical_merchant=redact_text(canonical)[:160],
+            canonical_confidence="high",
+            canonical_reason="Direkter Amex-Händlertext",
+        )
     if source.source_system != "sparda":
         return TransactionDetail(
             raw_counterparty=raw_counterparty,

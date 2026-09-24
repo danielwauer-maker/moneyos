@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="intro"><div><h2>American-Express-Import prüfen</h2><p>Kartenreferenzen und vollständige Rohdaten werden nicht angezeigt. Abrechnungszahlungen bleiben getrennt von Händlerausgaben.</p></div></div>
+<div class="kpi-grid">
+  <article class="kpi"><span>Quellzeilen</span><strong>{{ summary.source_rows_parsed }}</strong><small>Struktur und Pflichtspalten geprüft</small></article>
+  <article class="kpi"><span>Händlerkäufe</span><strong>{{ summary.merchant_purchases }}</strong><small>Jeweils genau ein Ausgabe-Ereignis</small></article>
+  <article class="kpi"><span>Refunds</span><strong>{{ summary.refunds }}</strong><small>Händlergutschriften</small></article>
+  <article class="kpi"><span>Abrechnungszahlungen</span><strong>{{ summary.settlement_rows }}</strong><small>Keine doppelten Ausgaben</small></article>
+  <article class="kpi"><span>Gebühren / Zinsen / Sonstiges</span><strong>{{ summary.fees_interest_other }}</strong><small>Nur explizite Belastungen werden Ereignisse</small></article>
+  <article class="kpi warning"><span>Ungeklärt</span><strong>{{ summary.unresolved_rows }}</strong><small>Erzeugt nur Review Items</small></article>
+  <article class="kpi"><span>Sparda-Matches hoch / mittel</span><strong>{{ summary.high_confidence_sparda_matches }} / {{ summary.medium_confidence_sparda_matches }}</strong><small>{{ summary.unmatched_settlement_rows }} Abrechnungszahlungen ohne Match</small></article>
+  <article class="kpi"><span>Reviews</span><strong>{{ summary.review_items }}</strong><small>{{ summary.repeated_reference_ids }} mehrfach vorkommende Referenz-IDs</small></article>
+</div>
+<article class="panel table-panel" style="margin-top:18px"><table><thead><tr><th>Zeile</th><th>Datum</th><th>Sicherer Händler</th><th>Semantik</th><th>Betrag</th><th>Settlement-Match</th><th>Review</th></tr></thead><tbody>
+{% for row in rows %}<tr><td>{{ row.row_number }}</td><td>{{ row.booked_at }}</td><td><strong>{{ row.merchant }}</strong></td><td>{{ row.semantic }}</td><td class="amount">{{ row.amount }}</td><td>{{ row.match_confidence or '–' }}</td><td>{{ 'ja' if row.needs_review else 'nein' }}</td></tr>{% endfor %}
+</tbody></table></article>
+{% if truncated %}<div class="notice">Die Vorschau zeigt nur die ersten 100 redaktierten Zeilen.</div>{% endif %}
+{% if private_import_enabled %}<form action="/import/{{ batch.id }}/execute" method="post" style="margin-top:18px"><button class="primary-button" type="submit">Atomaren Amex-Import starten</button> <a class="secondary-button" href="/import">Abbrechen</a></form>{% else %}<div class="notice">Produktivimport gesperrt: Im Demo-Profil ist nur die Vorschau verfügbar.</div>{% endif %}
+{% endblock %}

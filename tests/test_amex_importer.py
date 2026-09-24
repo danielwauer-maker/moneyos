@@ -259,6 +259,58 @@ def test_semantics_are_mutually_exclusive_and_conservative(tmp_path: Path) -> No
     ]
 
 
+def test_real_statement_payment_precedes_negative_refund_fallback(tmp_path: Path) -> None:
+    path = tmp_path / "amex.csv"
+    path.write_bytes(
+        _csv_bytes(
+            [
+                _row(
+                    **{
+                        "Beschreibung": "ZAHLUNG/ÜBERWEISUNG ERHALTEN BESTEN DANK",
+                        "Betrag": "-1.146,24",
+                    }
+                ),
+                _row(
+                    **{
+                        "Beschreibung": "Beispielhändler",
+                        "Betrag": "-24,90",
+                    }
+                ),
+            ]
+        )
+    )
+
+    settlement, refund = [classify_amex_row(row) for row in parse_amex_csv(path)]
+
+    assert settlement.semantic == "statement_payment"
+    assert settlement.event_type is None
+    assert settlement.needs_review is False
+    assert refund.semantic == "refund"
+    assert refund.event_type == "refund"
+
+
+def test_real_extrapunkte_participation_charge_is_explicit_fee(tmp_path: Path) -> None:
+    path = tmp_path / "amex.csv"
+    path.write_bytes(
+        _csv_bytes(
+            [
+                _row(
+                    **{
+                        "Beschreibung": "ExtraPunkte Teilnahmegebuehr",
+                        "Betrag": "30,00",
+                    }
+                )
+            ]
+        )
+    )
+
+    decision = classify_amex_row(parse_amex_csv(path)[0])
+
+    assert decision.semantic == "fee_interest"
+    assert decision.event_type == "expense"
+    assert decision.needs_review is False
+
+
 def test_duplicate_reference_ids_do_not_collapse_distinct_rows(tmp_path: Path) -> None:
     path = tmp_path / "amex.csv"
     path.write_bytes(

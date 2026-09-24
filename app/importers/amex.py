@@ -97,6 +97,8 @@ HEADER_ALIASES = {
 }
 
 SETTLEMENT_MARKERS = (
+    "zahlung/überweisung erhalten besten dank",
+    "zahlung/ueberweisung erhalten besten dank",
     "zahlung erhalten",
     "ihre zahlung",
     "payment received",
@@ -107,6 +109,8 @@ SETTLEMENT_MARKERS = (
 )
 REFUND_MARKERS = ("refund", "rückerstattung", "ruckerstattung", "gutschrift", "storno")
 FEE_MARKERS = (
+    "extrapunkte teilnahmegebühr",
+    "extrapunkte teilnahmegebuehr",
     "jahresgebühr",
     "jahresgebuhr",
     "kartenentgelt",

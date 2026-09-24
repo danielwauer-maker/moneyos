@@ -158,9 +158,13 @@ werden separat ausgewiesen. Diese Ansicht schreibt weder Ist-Snapshots noch
 Umschlagbewegungen in die Datenbank.
 
 Der Arbeitsbereich **Umschlag-Zuordnung** bündelt die relevanten Vorgänge seit dem
-bestätigten Basisstand. Einzel- und Mehrfachauswahl können einem physischen Umschlag
-zugeordnet, final als „Kein Umschlag“ markiert oder zurückgestellt werden. Filter
+bestätigten Basisstand. Kategorie/Unterkategorie und physischer Umschlag werden in
+derselben kompakten Tabelle, aber als unabhängige Entscheidungen geführt. Einzel-
+und Mehrfachauswahl können nur eine Kategorie, nur einen Umschlag oder beides
+erhalten; „Kein Umschlag“ ist ebenfalls eine finale, unabhängige Entscheidung. Filter
 für Monat, Zahlungspartner, Kategorie, Konto und Entscheidungsstatus sowie
 Gruppierungen nach Zahlungspartner, Kategorie, Monat und Betrag unterstützen den
 schnellen Abgleich. Aus konsistenten Mehrfachauswahlen können priorisierte Regeln
-entstehen; diese liefern ausschließlich Vorschläge und ordnen niemals still zu.
+entstehen; diese können Kategorie und Umschlag gemeinsam vorschlagen, ordnen aber
+niemals still zu. Review-only-Quellen behalten eine Kategorieentscheidung für eine
+spätere Ereigniserzeugung, ohne dadurch vorzeitig ein Economic Event anzulegen.

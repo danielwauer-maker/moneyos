@@ -454,6 +454,30 @@ class EnvelopeAssignmentDecision(Base):
     assignment_rule: Mapped[AssignmentRule | None] = relationship()
 
 
+class CategoryAssignmentDecision(Base):
+    __tablename__ = "category_assignment_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "source_transaction_id IS NOT NULL OR economic_event_id IS NOT NULL",
+            name="ck_category_assignment_source",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    candidate_key: Mapped[str] = mapped_column(String(80), unique=True)
+    source_transaction_id: Mapped[int | None] = mapped_column(ForeignKey("source_transactions.id"))
+    economic_event_id: Mapped[int | None] = mapped_column(ForeignKey("economic_events.id"))
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
+    assignment_rule_id: Mapped[int | None] = mapped_column(ForeignKey("assignment_rules.id"))
+    decided_at: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    source_transaction: Mapped[SourceTransaction | None] = relationship()
+    economic_event: Mapped[EconomicEvent | None] = relationship()
+    category: Mapped[Category] = relationship()
+    assignment_rule: Mapped[AssignmentRule | None] = relationship()
+
+
 class ReconciliationRun(Base):
     __tablename__ = "reconciliation_runs"
 

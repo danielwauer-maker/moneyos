@@ -22,6 +22,8 @@ Kernbereiche:
 - `review_items`, `assignment_rules`: nachvollziehbare Entscheidungen.
 - `envelope_assignment_decisions`: eindeutige Entscheidung je Quelltransaktion
   beziehungsweise Economic Event (`assigned`, `no_envelope`, `later`).
+- `category_assignment_decisions`: bestätigte Kategorie je Kandidat, insbesondere
+  auch für Review-only-Quellen, die noch kein Economic Event besitzen.
 - `recurring_items`, `forecast_entries`, `reconciliation_runs`: Planung.
 
 Das vollständige SQLAlchemy-Schema ist in `app/db/models.py` definiert und über
@@ -57,3 +59,6 @@ Alembic versioniert.
 - „Kein Umschlag“ ist ein persistierter finaler Zustand und daher nicht mit einem
   noch leeren `economic_events.envelope_id` gleichzusetzen. Wiederholtes Speichern
   aktualisiert dieselbe Entscheidung und erzeugt keine doppelte Sollwirkung.
+- Kategorie- und Umschlagentscheidung sind orthogonal: Keine von beiden erzwingt
+  die jeweils andere. Kategorien verändern weder Konto- noch Umschlagsalden;
+  Umschlagzuordnungen wirken nur auf die berechnete Soll-/Abgleichsicht.

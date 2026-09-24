@@ -35,8 +35,9 @@ from app.services.diagnostics import run_diagnostics
 from app.services.envelope_assignments import (
     apply_assignment_decisions,
     build_assignment_workspace,
+    create_subcategory,
     rule_condition_label,
-    update_envelope_rule,
+    update_suggestion_rule,
 )
 from app.services.import_staging import batch_file_path, stage_upload
 from app.services.reviews import build_review_view
@@ -122,7 +123,9 @@ def envelope_assignments(request: Request, db: DbSession) -> HTMLResponse:
         {
             "rule": rule,
             "condition": rule_condition_label(rule, db),
+            "category_id": (rule.action_json or {}).get("category_id"),
             "envelope_id": (rule.action_json or {}).get("envelope_id"),
+            "envelope_decision": (rule.action_json or {}).get("envelope_decision"),
         }
         for rule in workspace.rules
     ]
@@ -162,8 +165,11 @@ def decide_envelope_assignments(
     request: Request,
     db: DbSession,
     candidate_keys: Annotated[list[str], Form()],
-    decision: Annotated[str, Form()],
+    decision: Annotated[str | None, Form()] = None,
+    operation: Annotated[str | None, Form()] = None,
     envelope_id: Annotated[int | None, Form()] = None,
+    envelope_mode: Annotated[str | None, Form()] = None,
+    category_id: Annotated[int | None, Form()] = None,
     create_rule: Annotated[bool, Form()] = False,
     rule_basis: Annotated[str, Form()] = "auto",
     return_to: Annotated[str | None, Form()] = None,
@@ -173,11 +179,27 @@ def decide_envelope_assignments(
             status_code=409, detail="Umschlag-Zuordnungen sind privatprofilgebunden"
         )
     try:
+        apply_category = operation in {"category", "combined", "category_no_envelope"} or (
+            operation == "rule" and category_id is not None
+        )
+        if operation in {"envelope", "combined"}:
+            decision = "assigned"
+        elif operation in {"no_envelope", "category_no_envelope"}:
+            decision = "no_envelope"
+        elif operation == "later":
+            decision = "later"
+        elif operation == "category":
+            decision = None
+        elif operation == "rule":
+            decision = envelope_mode if envelope_mode in {"assigned", "no_envelope"} else None
+            create_rule = True
         apply_assignment_decisions(
             db,
             keys=candidate_keys,
             decision=decision,
             envelope_id=envelope_id,
+            category_id=category_id,
+            apply_category=apply_category,
             create_rule=create_rule or request.query_params.get("create_rule") == "true",
             rule_basis=rule_basis,
         )
@@ -193,20 +215,42 @@ def edit_envelope_rule(
     rule_id: int,
     db: DbSession,
     priority: Annotated[int, Form()],
-    envelope_id: Annotated[int, Form()],
+    envelope_id: Annotated[int | None, Form()] = None,
+    category_id: Annotated[int | None, Form()] = None,
+    envelope_mode: Annotated[str | None, Form()] = None,
     enabled: Annotated[bool, Form()] = False,
     return_to: Annotated[str | None, Form()] = None,
 ) -> RedirectResponse:
     if get_settings().demo_mode:
         raise HTTPException(status_code=409, detail="Umschlag-Regeln sind privatprofilgebunden")
     try:
-        update_envelope_rule(
+        update_suggestion_rule(
             db,
             rule_id=rule_id,
             priority=priority,
             enabled=enabled,
+            category_id=category_id,
+            envelope_decision=envelope_mode,
             envelope_id=envelope_id,
         )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(_assignment_redirect(return_to, str(exc)), status_code=303)
+    return RedirectResponse(_assignment_redirect(return_to), status_code=303)
+
+
+@router.post("/envelope-assignments/categories")
+def add_review_subcategory(
+    db: DbSession,
+    parent_id: Annotated[int, Form()],
+    name: Annotated[str, Form()],
+    return_to: Annotated[str | None, Form()] = None,
+) -> RedirectResponse:
+    if get_settings().demo_mode:
+        raise HTTPException(status_code=409, detail="Kategoriepflege ist privatprofilgebunden")
+    try:
+        create_subcategory(db, parent_id=parent_id, name=name)
         db.commit()
     except ValueError as exc:
         db.rollback()

@@ -24,8 +24,9 @@ Saldo-Bestätigungen werden ausschließlich im privaten SQLite-Profil gespeicher
 Formulare akzeptieren Decimal-Text, führen keine Rohdaten in Logs und sind im
 Demo-Profil auf HTTP-Ebene gesperrt. Der Sparda-Historienbackfill liest nur den
 bereits importierten Saldo und ändert keine Raw Records oder Source Transactions.
-Umschlagentscheidungen und private Vorschlagsregeln werden ebenfalls ausschließlich
-in der lokalen Profildatenbank gespeichert. Tabellen und Logs zeigen keine IBANs,
+Kategorie-/Umschlagentscheidungen und private Vorschlagsregeln werden ebenfalls
+ausschließlich in der lokalen Profildatenbank gespeichert. Regeln erzeugen nur
+Vorschläge und führen keine stillen Zuordnungen aus. Tabellen und Logs zeigen keine IBANs,
 Kartenkennungen oder Rohimporte; sichtbare Zahlungspartner werden vor der Ausgabe
 mit der zentralen Redaction-Hilfe behandelt.
 

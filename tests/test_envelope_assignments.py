@@ -15,12 +15,14 @@ from app.db.models import (
     Account,
     AssignmentRule,
     Category,
+    CategoryAssignmentDecision,
     EconomicEvent,
     Envelope,
     EnvelopeAssignmentDecision,
     EnvelopeRulePeriod,
     EnvelopeSnapshot,
     EventSourceLink,
+    ReviewItem,
     SourceTransaction,
     SourceTransactionAccount,
 )
@@ -29,6 +31,7 @@ from app.main import app
 from app.services.envelope_assignments import (
     apply_assignment_decisions,
     build_assignment_workspace,
+    create_subcategory,
 )
 from app.services.envelope_targets import calculate_envelope_targets
 
@@ -147,6 +150,40 @@ def _key(source: SourceTransaction) -> str:
     return f"source:{source.id}"
 
 
+def _review_only_transaction(
+    db: Session, key: str, *, merchant: str = "Unklarer synthetischer Händler"
+) -> SourceTransaction:
+    account = _account(db)
+    source = SourceTransaction(
+        source_system="synthetic",
+        source_transaction_id=key,
+        booked_at=datetime(2026, 5, 11, 12),
+        merchant_raw=merchant,
+        description_raw="Synthetischer Prüffall",
+        amount=-D("12.50"),
+        fingerprint=key.ljust(64, "r"),
+    )
+    db.add(source)
+    db.flush()
+    db.add_all(
+        [
+            SourceTransactionAccount(
+                source_transaction_id=source.id, account_id=account.id, role="source"
+            ),
+            ReviewItem(
+                source_transaction_id=source.id,
+                review_type="classification",
+                proposed_event_type="expense",
+                confidence=D("0.4"),
+                explanation="Synthetischer Prüffall",
+                status="open",
+            ),
+        ]
+    )
+    db.flush()
+    return source
+
+
 def _target(db: Session):
     db.flush()
     return calculate_envelope_targets(
@@ -254,6 +291,132 @@ def test_category_rule_is_only_a_proposal(db: Session) -> None:
 
     assert third.proposed_envelope.id == envelope.id
     assert third_event.envelope_id is None
+
+
+def test_category_and_envelope_decisions_remain_independent(db: Session) -> None:
+    envelope = _envelope(db)
+    category = _category(db)
+    source, event = _transaction(db, "independent")
+
+    apply_assignment_decisions(
+        db, keys=[_key(source)], category_id=category.id, apply_category=True
+    )
+    assert event.category_id == category.id
+    assert event.envelope_id is None
+    assert build_assignment_workspace(db).progress.envelopes_confirmed == 0
+
+    apply_assignment_decisions(
+        db, keys=[_key(source)], decision="assigned", envelope_id=envelope.id
+    )
+    assert event.category_id == category.id
+    assert event.envelope_id == envelope.id
+    progress = build_assignment_workspace(db).progress
+    assert progress.categories_confirmed == 1
+    assert progress.envelopes_confirmed == 1
+    assert progress.fully_reviewed == 1
+
+
+def test_bulk_category_and_combined_assignment(db: Session) -> None:
+    envelope = _envelope(db)
+    category = _category(db)
+    first_source, first_event = _transaction(db, "category-bulk-one")
+    second_source, second_event = _transaction(db, "category-bulk-two")
+
+    apply_assignment_decisions(
+        db,
+        keys=[_key(first_source), _key(second_source)],
+        category_id=category.id,
+        apply_category=True,
+    )
+    assert first_event.category_id == second_event.category_id == category.id
+    assert first_event.envelope_id is None and second_event.envelope_id is None
+
+    apply_assignment_decisions(
+        db,
+        keys=[_key(first_source), _key(second_source)],
+        decision="assigned",
+        envelope_id=envelope.id,
+        category_id=category.id,
+        apply_category=True,
+    )
+    assert first_event.envelope_id == second_event.envelope_id == envelope.id
+    assert db.scalar(select(func.count()).select_from(CategoryAssignmentDecision)) == 2
+
+
+def test_review_only_category_decision_does_not_create_event(db: Session) -> None:
+    category = _category(db)
+    source = _review_only_transaction(db, "review-only-category")
+
+    apply_assignment_decisions(
+        db, keys=[_key(source)], category_id=category.id, apply_category=True
+    )
+
+    decision = db.scalar(
+        select(CategoryAssignmentDecision).where(
+            CategoryAssignmentDecision.source_transaction_id == source.id
+        )
+    )
+    assert decision is not None and decision.category_id == category.id
+    assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 0
+
+
+def test_combined_rule_only_proposes_category_and_no_envelope(db: Session) -> None:
+    _envelope(db)
+    category = _category(db)
+    first_source, _ = _transaction(db, "combined-rule-one", merchant="Regel Händler")
+    second_source, _ = _transaction(db, "combined-rule-two", merchant="Regel Händler")
+    apply_assignment_decisions(
+        db,
+        keys=[_key(first_source), _key(second_source)],
+        decision="no_envelope",
+        category_id=category.id,
+        apply_category=True,
+        create_rule=True,
+        rule_basis="merchant",
+    )
+
+    third_source, third_event = _transaction(db, "combined-rule-three", merchant="Regel Händler")
+    row = next(
+        item for item in build_assignment_workspace(db).candidates if item.key == _key(third_source)
+    )
+    assert row.proposed_category.id == category.id
+    assert row.proposed_envelope_decision == "no_envelope"
+    assert third_event.category_id is None
+    assert third_event.envelope_id is None
+
+
+def test_duplicate_subcategory_is_rejected_case_insensitively(db: Session) -> None:
+    parent = _category(db, "Lebensmittel")
+    create_subcategory(db, parent_id=parent.id, name="Supermarkt")
+
+    with pytest.raises(ValueError, match="existiert bereits"):
+        create_subcategory(db, parent_id=parent.id, name="  supermarkt  ")
+
+
+def test_category_update_does_not_change_financial_balances(db: Session) -> None:
+    envelope = _envelope(db)
+    category = _category(db)
+    source, event = _transaction(db, "category-no-money")
+    account = _account(db)
+    account.balance = D("123.45")
+    before_snapshot = db.scalar(
+        select(EnvelopeSnapshot.physical_balance).where(EnvelopeSnapshot.envelope_id == envelope.id)
+    )
+
+    apply_assignment_decisions(
+        db, keys=[_key(source)], category_id=category.id, apply_category=True
+    )
+
+    assert event.category_id == category.id
+    assert account.balance == D("123.45")
+    assert (
+        db.scalar(
+            select(EnvelopeSnapshot.physical_balance).where(
+                EnvelopeSnapshot.envelope_id == envelope.id
+            )
+        )
+        == before_snapshot
+    )
 
 
 def test_refund_recalculates_once_and_repeated_decision_is_idempotent(db: Session) -> None:

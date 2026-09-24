@@ -66,14 +66,18 @@ Ist-Bestand nicht; dafür zählen nur bestätigte Snapshots und physische
 nicht geschätzt, sondern markieren betroffene Sollwerte als vorläufig. Damit werden
 weder historische Bestätigungen noch private Rohdaten beim Aufruf der Seite verändert.
 
-`app/services/envelope_assignments.py` stellt den getrennten Arbeitsbereich für
-Umschlagentscheidungen bereit. `envelope_assignment_decisions` unterscheidet eine
+`app/services/envelope_assignments.py` stellt den gemeinsamen Arbeitsbereich für
+Kategorie- und Umschlagentscheidungen bereit. `category_assignment_decisions`
+bewahrt die bestätigte Kategorie unabhängig von der Umschlagdimension; bei einem
+vorhandenen Economic Event wird dessen Kategorie aktualisiert, bei Review-only-
+Quellen bleibt die Entscheidung separat und erzeugt kein geratenes Ereignis.
+`envelope_assignment_decisions` unterscheidet eine
 bestätigte Zuordnung, die finale Entscheidung „Kein Umschlag“ und „Später prüfen“.
 Nur bei bereits bestätigten Ausgaben oder Refunds wird die Zuordnung auf das
 Economic Event übertragen; ein Review-only-Vorgang erzeugt dadurch kein Ereignis.
-Regeln des Typs `envelope_suggestion` sind priorisierte, prüfbare Vorschläge und
-werden niemals automatisch als Umschlagzuordnung ausgeführt. Physische Snapshots
-und Bewegungen liegen vollständig außerhalb dieses Workflows.
+Priorisierte `review_suggestion`-Regeln können Kategorie, Umschlag oder beides als
+Vorschlag liefern. Sie werden niemals automatisch ausgeführt. Physische Snapshots,
+Bewegungen und Kontosalden liegen vollständig außerhalb dieses Workflows.
 
 `app/services/import_staging.py` übernimmt Streaming, SHA-256, unveränderte lokale
 Ablage, Dateityp-/Inhaltsprüfung und Quarantäne. Erst ein Batch im Zustand `valid`

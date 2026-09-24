@@ -1,0 +1,506 @@
+from __future__ import annotations
+
+import csv
+import io
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+from sqlalchemy import create_engine, func, select
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.config import Settings
+from app.db.migrations import upgrade_database
+from app.db.models import (
+    Account,
+    EconomicEvent,
+    EventSourceLink,
+    ImportBatch,
+    RawImportRecord,
+    ReviewItem,
+    SourceTransaction,
+    SourceTransactionAccount,
+)
+from app.importers import paypal
+from app.importers.paypal import (
+    PayPalFormatError,
+    classify_paypal_row,
+    dry_run_paypal_file,
+    import_paypal_batch,
+    match_sparda_funding,
+    parse_paypal_csv,
+    preview_paypal_file,
+)
+from app.services.import_staging import stage_upload
+from app.services.transaction_review import build_transaction_review
+
+D = Decimal
+
+PAYPAL_COLUMNS = (
+    "Datum",
+    "Uhrzeit",
+    "Zeitzone",
+    "Name",
+    "Typ",
+    "Status",
+    "Währung",
+    "Brutto",
+    "Gebühr",
+    "Netto",
+    "Absender E-Mail-Adresse",
+    "Empfänger E-Mail-Adresse",
+    "Transaktionscode",
+    "Artikelbezeichnung",
+    "Zugehöriger Transaktionscode",
+    "Betreff",
+    "Hinweis",
+    "Auswirkung auf Guthaben",
+)
+
+
+@pytest.fixture
+def paypal_store(tmp_path: Path) -> tuple[Settings, sessionmaker[Session]]:
+    database_path = tmp_path / "database" / "moneyos.sqlite"
+    database_path.parent.mkdir()
+    database_url = f"sqlite:///{database_path.as_posix()}"
+    settings = Settings(
+        database_url=database_url,
+        private_database_url=database_url,
+        demo_mode=False,
+        private_data_dir=tmp_path / "private",
+        backup_dir=tmp_path / "backups",
+        log_dir=tmp_path / "logs",
+    )
+    settings.ensure_local_directories()
+    upgrade_database(database_url)
+    engine = create_engine(database_url)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory.begin() as db:
+        db.add_all(
+            [
+                Account(name="PayPal", account_type="payment", balance_confirmed=False),
+                Account(name="Sparda Girokonto", account_type="checking"),
+            ]
+        )
+    yield settings, factory
+    engine.dispose()
+
+
+def _row(**overrides: str) -> dict[str, str]:
+    row = dict.fromkeys(PAYPAL_COLUMNS, "")
+    row.update(
+        {
+            "Datum": "14.09.2026",
+            "Uhrzeit": "10:30:00",
+            "Zeitzone": "Europe/Berlin",
+            "Name": "Fiktiver Händler",
+            "Typ": "Allgemeine Zahlung",
+            "Status": "Abgeschlossen",
+            "Währung": "EUR",
+            "Brutto": "-24,90",
+            "Gebühr": "0,00",
+            "Netto": "-24,90",
+            "Transaktionscode": "SYN-MERCHANT-1",
+            "Artikelbezeichnung": "Synthetischer Artikel",
+            "Auswirkung auf Guthaben": "Soll",
+        }
+    )
+    row.update(overrides)
+    return row
+
+
+def _csv_bytes(rows: list[dict[str, str]], columns: tuple[str, ...] = PAYPAL_COLUMNS) -> bytes:
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=list(columns), lineterminator="\r\n")
+    writer.writeheader()
+    writer.writerows({column: row.get(column, "") for column in columns} for row in rows)
+    return output.getvalue().encode("utf-8-sig")
+
+
+def _stage(
+    settings: Settings,
+    factory: sessionmaker[Session],
+    rows: list[dict[str, str]],
+    *,
+    filename: str = "paypal.csv",
+) -> ImportBatch:
+    with factory() as db:
+        return stage_upload(
+            db,
+            source_type="paypal",
+            original_filename=filename,
+            stream=io.BytesIO(_csv_bytes(rows)),
+            settings=settings,
+        ).batch
+
+
+def _import(
+    settings: Settings, factory: sessionmaker[Session], rows: list[dict[str, str]]
+) -> ImportBatch:
+    batch = _stage(settings, factory, rows)
+    assert batch.status == "valid"
+    import_paypal_batch(factory, batch.id, settings)
+    with factory() as db:
+        return db.get(ImportBatch, batch.id)
+
+
+def test_utf8_bom_decimal_flexible_columns_and_required_validation(tmp_path: Path) -> None:
+    columns = tuple(reversed(PAYPAL_COLUMNS))
+    path = tmp_path / "paypal.csv"
+    path.write_bytes(_csv_bytes([_row(**{"Brutto": "-1.234,56", "Netto": "-1.234,56"})], columns))
+    rows = parse_paypal_csv(path)
+    assert rows[0].gross == D("-1234.56")
+    assert rows[0].occurred_at == datetime(2026, 9, 14, 10, 30)
+    assert rows[0].raw_values["Hinweis"] == ""
+
+    missing = tuple(column for column in PAYPAL_COLUMNS if column != "Netto")
+    path.write_bytes(_csv_bytes([_row()], missing))
+    with pytest.raises(PayPalFormatError, match="Netto"):
+        parse_paypal_csv(path)
+
+
+@pytest.mark.parametrize(
+    "transaction_type",
+    [
+        "Allgemeine Gutschrift auf Kreditkarte",
+        "Allgemeine Abbuchung von Kreditkarte",
+        "Bankgutschrift auf PayPal-Konto",
+        "Allgemeine Autorisierung",
+        "Einbehaltung für offene Autorisierung",
+        "Rückbuchung allgemeiner Einbehaltung",
+    ],
+)
+def test_technical_rows_never_become_expenses(tmp_path: Path, transaction_type: str) -> None:
+    path = tmp_path / "paypal.csv"
+    path.write_bytes(_csv_bytes([_row(**{"Typ": transaction_type})]))
+    decision = classify_paypal_row(parse_paypal_csv(path)[0])
+    assert decision.is_technical is True
+    assert decision.event_type is None
+
+
+def test_group_creates_one_expense_and_links_technical_rows(
+    paypal_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = paypal_store
+    merchant = _row()
+    funding = _row(
+        **{
+            "Name": "PayPal",
+            "Typ": "Bankgutschrift auf PayPal-Konto",
+            "Brutto": "24,90",
+            "Netto": "24,90",
+            "Transaktionscode": "SYN-FUNDING-1",
+            "Zugehöriger Transaktionscode": "SYN-MERCHANT-1",
+        }
+    )
+    authorization = _row(
+        **{
+            "Typ": "Allgemeine Autorisierung",
+            "Transaktionscode": "SYN-AUTH-1",
+            "Zugehöriger Transaktionscode": "SYN-MERCHANT-1",
+        }
+    )
+    batch = _import(settings, factory, [merchant, funding, authorization])
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(RawImportRecord)) == 3
+        assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 3
+        assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 1
+        event = db.scalar(select(EconomicEvent))
+        assert event.event_type == "expense"
+        assert event.amount == D("24.90")
+        assert db.scalar(select(func.count()).select_from(SourceTransactionAccount)) == 3
+        assert set(db.scalars(select(EventSourceLink.link_type))) == {
+            "canonical_source",
+            "funding_leg",
+            "authorization",
+        }
+        assert batch.metadata_json["import_summary"]["merchant_payments"] == 1
+        assert batch.metadata_json["import_summary"]["technical_funding_rows"] == 2
+        paypal_account = db.scalar(select(Account).where(Account.name == "PayPal"))
+        assert paypal_account.balance == D("0.00")
+        assert paypal_account.balance_confirmed is False
+
+
+def test_refund_is_linked_to_origin_and_not_income(
+    paypal_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = paypal_store
+    refund = _row(
+        **{
+            "Datum": "16.09.2026",
+            "Typ": "Rückzahlung",
+            "Brutto": "24,90",
+            "Netto": "24,90",
+            "Transaktionscode": "SYN-REFUND-1",
+            "Zugehöriger Transaktionscode": "SYN-MERCHANT-1",
+        }
+    )
+    _import(settings, factory, [_row(), refund])
+    with factory() as db:
+        assert list(db.scalars(select(EconomicEvent.event_type).order_by(EconomicEvent.id))) == [
+            "expense",
+            "refund",
+        ]
+        assert "refund_origin" in set(db.scalars(select(EventSourceLink.link_type)))
+
+
+def test_conservative_sparda_matching_and_no_double_count(
+    paypal_store: tuple[Settings, sessionmaker[Session]], tmp_path: Path
+) -> None:
+    settings, factory = paypal_store
+    with factory.begin() as db:
+        sparda_source = SourceTransaction(
+            source_system="sparda",
+            source_transaction_id="sparda-synthetic-paypal",
+            booked_at=datetime(2026, 9, 14),
+            value_at=datetime(2026, 9, 14),
+            merchant_raw="PayPal Europe",
+            description_raw="Synthetische PayPal-Abbuchung",
+            amount=D("-24.90"),
+            currency="EUR",
+            status="booked",
+            metadata_json={"sparda_semantic": "paypal_funding_leg"},
+            fingerprint="a" * 64,
+        )
+        sparda_transfer = EconomicEvent(
+            event_type="transfer",
+            occurred_at=datetime(2026, 9, 14),
+            description="Synthetischer PayPal-Transfer",
+            amount=D("24.90"),
+            currency="EUR",
+            status="booked",
+        )
+        db.add_all([sparda_source, sparda_transfer])
+        db.flush()
+        db.add(
+            EventSourceLink(
+                economic_event_id=sparda_transfer.id,
+                source_transaction_id=sparda_source.id,
+                link_type="canonical_source",
+                confidence=D("0.99"),
+            )
+        )
+    merchant = _row()
+    funding = _row(
+        **{
+            "Name": "PayPal",
+            "Typ": "Bankgutschrift auf PayPal-Konto",
+            "Brutto": "24,90",
+            "Netto": "24,90",
+            "Transaktionscode": "SYN-FUNDING-1",
+            "Zugehöriger Transaktionscode": "SYN-MERCHANT-1",
+        }
+    )
+    path = tmp_path / "paypal.csv"
+    path.write_bytes(_csv_bytes([merchant, funding]))
+    with factory() as db:
+        rows = parse_paypal_csv(path)
+        matches = match_sparda_funding(db, rows)
+        funding_match = matches[
+            next(row.row_number for row in rows if "Bankgutschrift" in row.transaction_type)
+        ]
+        assert funding_match.confidence == "high"
+
+    _import(settings, factory, [merchant, funding])
+    with factory() as db:
+        assert list(db.scalars(select(EconomicEvent.event_type).order_by(EconomicEvent.id))) == [
+            "transfer",
+            "expense",
+        ]
+        assert db.scalar(select(func.count()).select_from(EventSourceLink)) == 4
+
+
+def test_multi_event_group_uses_direct_references_and_reviews_ambiguity(
+    paypal_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = paypal_store
+    merchant_one = _row(
+        **{
+            "Transaktionscode": "SYN-M1",
+            "Zugehöriger Transaktionscode": "SYN-F1",
+            "Brutto": "-10,00",
+            "Netto": "-10,00",
+        }
+    )
+    funding_one = _row(
+        **{
+            "Name": "PayPal",
+            "Typ": "Bankgutschrift auf PayPal-Konto",
+            "Transaktionscode": "SYN-F1",
+            "Zugehöriger Transaktionscode": "SYN-M1",
+            "Brutto": "10,00",
+            "Netto": "10,00",
+        }
+    )
+    bridge = _row(
+        **{
+            "Name": "PayPal",
+            "Typ": "Allgemeine Autorisierung",
+            "Transaktionscode": "SYN-A1",
+            "Zugehöriger Transaktionscode": "SYN-F1",
+        }
+    )
+    funding_two = _row(
+        **{
+            "Name": "PayPal",
+            "Typ": "Bankgutschrift auf PayPal-Konto",
+            "Transaktionscode": "SYN-F2",
+            "Zugehöriger Transaktionscode": "SYN-A1",
+            "Brutto": "20,00",
+            "Netto": "20,00",
+        }
+    )
+    merchant_two = _row(
+        **{
+            "Transaktionscode": "SYN-M2",
+            "Zugehöriger Transaktionscode": "SYN-F2",
+            "Brutto": "-20,00",
+            "Netto": "-20,00",
+        }
+    )
+    _import(
+        settings,
+        factory,
+        [merchant_one, funding_one, bridge, funding_two, merchant_two],
+    )
+    with factory() as db:
+        sources = {
+            source.source_transaction_id: source for source in db.scalars(select(SourceTransaction))
+        }
+        canonical = {
+            link.source_transaction_id: link.economic_event_id
+            for link in db.scalars(
+                select(EventSourceLink).where(EventSourceLink.link_type == "canonical_source")
+            )
+        }
+        funding_links = {
+            link.source_transaction_id: link.economic_event_id
+            for link in db.scalars(
+                select(EventSourceLink).where(EventSourceLink.link_type == "funding_leg")
+            )
+        }
+        assert funding_links[sources["paypal:SYN-F1"].id] == canonical[sources["paypal:SYN-M1"].id]
+        assert funding_links[sources["paypal:SYN-F2"].id] == canonical[sources["paypal:SYN-M2"].id]
+        bridge_review = db.scalar(
+            select(ReviewItem).where(
+                ReviewItem.source_transaction_id == sources["paypal:SYN-A1"].id
+            )
+        )
+        assert bridge_review.review_type == "paypal_group_link"
+
+
+def test_unresolved_row_only_creates_review_and_technical_rows_stay_out_of_review_workspace(
+    paypal_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = paypal_store
+    unresolved = _row(
+        **{
+            "Name": "",
+            "Typ": "Unbekannter Vorgang",
+            "Status": "Offen",
+            "Brutto": "0,00",
+            "Netto": "0,00",
+            "Transaktionscode": "SYN-UNKNOWN-1",
+        }
+    )
+    technical = _row(
+        **{
+            "Name": "PayPal",
+            "Typ": "Allgemeine Autorisierung",
+            "Transaktionscode": "SYN-AUTH-ONLY",
+        }
+    )
+    _import(settings, factory, [unresolved, technical])
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 0
+        assert db.scalar(select(func.count()).select_from(ReviewItem)) == 1
+        rows, _progress = build_transaction_review(db)
+        assert len(rows) == 1
+        assert rows[0].source.source_transaction_id == "paypal:SYN-UNKNOWN-1"
+
+
+def test_duplicate_file_and_row_detection(
+    paypal_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = paypal_store
+    row = _row()
+    first = _stage(settings, factory, [row])
+    with factory() as db:
+        duplicate = stage_upload(
+            db,
+            source_type="paypal",
+            original_filename="renamed.csv",
+            stream=io.BytesIO(_csv_bytes([row])),
+            settings=settings,
+        )
+        assert duplicate.duplicate is True
+        assert duplicate.batch.id == first.id
+    import_paypal_batch(factory, first.id, settings)
+    second = _import(
+        settings,
+        factory,
+        [row, _row(**{"Transaktionscode": "SYN-MERCHANT-2", "Brutto": "-5,00", "Netto": "-5,00"})],
+    )
+    assert second.metadata_json["import_summary"]["duplicate_rows"] == 1
+
+
+def test_full_import_rolls_back_on_failure(
+    paypal_store: tuple[Settings, sessionmaker[Session]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings, factory = paypal_store
+    batch = _stage(settings, factory, [_row()])
+    original = paypal._import_rows
+
+    def fail_after_work(db: Session, current: ImportBatch, path: Path) -> int:
+        original(db, current, path)
+        raise RuntimeError("synthetic failure")
+
+    monkeypatch.setattr(paypal, "_import_rows", fail_after_work)
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        import_paypal_batch(factory, batch.id, settings)
+    with factory() as db:
+        assert db.get(ImportBatch, batch.id).status == "failed"
+        assert db.scalar(select(func.count()).select_from(RawImportRecord)) == 0
+        assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 0
+        assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 0
+
+
+def test_preview_redacts_email_and_exposes_mutually_exclusive_counts(
+    paypal_store: tuple[Settings, sessionmaker[Session]], tmp_path: Path
+) -> None:
+    _settings, factory = paypal_store
+    path = tmp_path / "paypal.csv"
+    path.write_bytes(_csv_bytes([_row(**{"Name": "private.person@example.test"})]))
+    with factory() as db:
+        rows, summary, _matches = preview_paypal_file(path, db)
+    assert rows[0].merchant == "[REDACTED]"
+    assert summary.source_rows_parsed == (
+        summary.merchant_payments
+        + summary.refunds
+        + summary.technical_funding_rows
+        + summary.unresolved_rows
+    )
+
+
+def test_dry_run_is_read_only(
+    paypal_store: tuple[Settings, sessionmaker[Session]], tmp_path: Path
+) -> None:
+    _settings, factory = paypal_store
+    path = tmp_path / "paypal.csv"
+    path.write_bytes(_csv_bytes([_row()]))
+    with factory() as db:
+        before = (
+            db.scalar(select(func.count()).select_from(ImportBatch)),
+            db.scalar(select(func.count()).select_from(RawImportRecord)),
+            db.scalar(select(func.count()).select_from(SourceTransaction)),
+        )
+        report = dry_run_paypal_file(path, db)
+        after = (
+            db.scalar(select(func.count()).select_from(ImportBatch)),
+            db.scalar(select(func.count()).select_from(RawImportRecord)),
+            db.scalar(select(func.count()).select_from(SourceTransaction)),
+        )
+    assert report.source_rows == 1
+    assert report.duplicate_file is False
+    assert before == after == (0, 0, 0)

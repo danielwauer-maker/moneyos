@@ -8,7 +8,7 @@ Uploads zu Drittdiensten.
 ## Demo-/Privat-Trennung
 
 Das Demo-Profil (`MONEYOS_DEMO_MODE=true`) nutzt `data/moneyos.db`; produktive
-Sparda-Imports sind dort hart gesperrt. Das Privat-Profil
+Sparda- und PayPal-Imports sind dort hart gesperrt. Das Privat-Profil
 (`MONEYOS_DEMO_MODE=false`) nutzt standardmäßig die eigene Datenbank
 `data/private/profiles/private/moneyos.db`, eigene Staging-/Quarantäneverzeichnisse
 unter `data/private/profiles/private/imports/`, Backups unter `backups/private/`
@@ -65,6 +65,12 @@ nur im geschützten unveränderlichen Raw Record, weil sie für lokale Auditierb
 und stabile Duplikaterkennung benötigt werden. Importvorschau, Zusammenfassung und
 Logs geben diese Werte nicht aus. Fingerprints sind SHA-256-Werte und werden nicht
 als Ersatz für Laufwerksverschlüsselung betrachtet.
+
+Der PayPal-Adapter bewahrt E-Mail-Adressen, Transaktionscodes und Originalfelder
+nur im geschützten Raw-/Source-Speicher. Vorschau, Dry Audit, Importsummary und
+Logs geben weder diese Kennungen noch Rohzeilen aus. Ein bestätigter PayPal-Import
+erzeugt vor dem ersten Datenbankschreibvorgang ein Safety-Backup; der Befehl
+`audit-paypal` ist strikt lesend und kopiert die geprüfte Datei nicht.
 
 ## Backup und Restore
 

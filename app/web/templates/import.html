@@ -18,7 +18,7 @@
 {% endif %}
 <article class="panel">
   <h3>Lokales Import-Staging</h3>
-  <p>Sparda CSV ist produktiv mit Vorschau und atomarem Import. PayPal-, Amex- und Amazon-Dateien werden weiterhin nur sicher bereitgestellt und noch nicht geparst.</p>
+  <p>Sparda- und PayPal-CSV sind produktiv mit redaktierter Vorschau und atomarem Import. Amex- und Amazon-Dateien werden weiterhin nur sicher bereitgestellt.</p>
   <form action="/import/stage" method="post" enctype="multipart/form-data" class="upload-form">
     <label>Quelle <select name="source_type" required><option value="sparda">Sparda</option><option value="paypal">PayPal</option><option value="amex">American Express</option><option value="amazon">Amazon</option></select></label>
     <label>Datei <input name="upload" type="file" required></label>
@@ -28,6 +28,6 @@
 <article class="panel import-flow"><h3>Sicherer Ablauf</h3><ol><li>Upload</li><li>Hash</li><li>Validierung</li><li>Quarantäne</li><li>Duplikatprüfung</li><li>Später: Parser</li><li>Atomarer Import</li></ol></article>
 <div class="section-head"><div><h2>Import-Status</h2><p>Keine Dateinamen, Beschreibungen oder Rohdaten werden hier angezeigt.</p></div></div>
 <article class="panel table-panel"><table><thead><tr><th>Batch</th><th>Quelle</th><th>Status</th><th>Größe</th><th>Prüfung</th></tr></thead><tbody>
-{% for batch in batches %}<tr><td>#{{ batch.id }}</td><td>{{ batch.source_type }}</td><td><span class="badge {% if batch.status == 'valid' or batch.status == 'imported' %}success{% elif batch.status == 'quarantined' or batch.status == 'failed' %}warning{% else %}neutral{% endif %}">{{ batch.status }}</span></td><td>{{ batch.size_bytes or 0 }} Byte</td><td>{% for issue in (batch.validation_json or {}).get('issues', []) %}{{ issue.code }}{% if not loop.last %}, {% endif %}{% else %}{% if batch.source_type == 'sparda' and batch.status == 'valid' %}<a href="/import/{{ batch.id }}/preview">Vorschau</a>{% elif batch.status == 'imported' %}<a href="/import?batch_id={{ batch.id }}">Zusammenfassung</a>{% else %}–{% endif %}{% endfor %}</td></tr>{% else %}<tr><td colspan="5">Noch keine Dateien bereitgestellt.</td></tr>{% endfor %}
+{% for batch in batches %}<tr><td>#{{ batch.id }}</td><td>{{ batch.source_type }}</td><td><span class="badge {% if batch.status == 'valid' or batch.status == 'imported' %}success{% elif batch.status == 'quarantined' or batch.status == 'failed' %}warning{% else %}neutral{% endif %}">{{ batch.status }}</span></td><td>{{ batch.size_bytes or 0 }} Byte</td><td>{% for issue in (batch.validation_json or {}).get('issues', []) %}{{ issue.code }}{% if not loop.last %}, {% endif %}{% else %}{% if batch.source_type in ['sparda','paypal'] and batch.status == 'valid' %}<a href="/import/{{ batch.id }}/preview">Vorschau</a>{% elif batch.status == 'imported' %}<a href="/import?batch_id={{ batch.id }}">Zusammenfassung</a>{% else %}–{% endif %}{% endfor %}</td></tr>{% else %}<tr><td colspan="5">Noch keine Dateien bereitgestellt.</td></tr>{% endfor %}
 </tbody></table></article>
 {% endblock %}

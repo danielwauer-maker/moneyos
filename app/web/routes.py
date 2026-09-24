@@ -20,7 +20,13 @@ from app.db.models import (
     SourceTransactionAccount,
 )
 from app.db.session import get_db
+from app.importers.paypal import (
+    PayPalFormatError,
+    import_paypal_batch,
+    preview_paypal_file,
+)
 from app.importers.sparda import SpardaFormatError, import_sparda_batch, preview_sparda_file
+from app.services.backup import create_backup
 from app.services.balance_confirmations import (
     SOURCE_LABELS,
     STATUS_LABELS,
@@ -721,7 +727,7 @@ def upload_import(
         stream=upload.file,
         settings=get_settings(),
     )
-    if result.batch.source_type == "sparda" and result.batch.status == "valid":
+    if result.batch.source_type in {"sparda", "paypal"} and result.batch.status == "valid":
         if not result.duplicate:
             return RedirectResponse(f"/import/{result.batch.id}/preview", status_code=303)
         return RedirectResponse(
@@ -734,12 +740,28 @@ def upload_import(
 
 
 @router.get("/import/{batch_id}/preview", response_class=HTMLResponse)
-def preview_sparda(request: Request, batch_id: int, db: DbSession) -> HTMLResponse:
+def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLResponse:
     batch = db.get(ImportBatch, batch_id)
-    if batch is None or batch.source_type != "sparda" or batch.status != "valid":
-        raise HTTPException(status_code=404, detail="Valid Sparda import batch not found")
+    if batch is None or batch.source_type not in {"sparda", "paypal"} or batch.status != "valid":
+        raise HTTPException(status_code=404, detail="Valid import batch not found")
+    path = batch_file_path(batch, get_settings())
+    if batch.source_type == "paypal":
+        try:
+            rows, summary, _matches = preview_paypal_file(path, db)
+        except PayPalFormatError as exc:
+            raise HTTPException(status_code=422, detail=exc.code) from exc
+        return render(
+            request,
+            "paypal_preview.html",
+            active="import",
+            page_title="PayPal-Vorschau",
+            batch=batch,
+            rows=rows[:100],
+            summary=summary.as_dict(),
+            truncated=len(rows) > 100,
+        )
     try:
-        rows, summary = preview_sparda_file(batch_file_path(batch, get_settings()))
+        rows, summary = preview_sparda_file(path)
     except SpardaFormatError as exc:
         raise HTTPException(status_code=422, detail=exc.code) from exc
     return render(
@@ -755,17 +777,26 @@ def preview_sparda(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
 
 
 @router.post("/import/{batch_id}/execute")
-def execute_sparda(batch_id: int, db: DbSession) -> RedirectResponse:
+def execute_import(batch_id: int, db: DbSession) -> RedirectResponse:
     if get_settings().demo_mode:
         raise HTTPException(
             status_code=409,
-            detail="Produktive Sparda-Importe sind im Demo-Profil gesperrt.",
+            detail="Produktive Importe sind im Demo-Profil gesperrt.",
         )
     batch = db.get(ImportBatch, batch_id)
-    if batch is None or batch.source_type != "sparda" or batch.status != "valid":
-        raise HTTPException(status_code=404, detail="Valid Sparda import batch not found")
+    if batch is None or batch.source_type not in {"sparda", "paypal"} or batch.status != "valid":
+        raise HTTPException(status_code=404, detail="Valid import batch not found")
     factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
-    import_sparda_batch(factory, batch_id, get_settings())
+    if batch.source_type == "paypal":
+        settings = get_settings()
+        create_backup(
+            settings.active_database_url,
+            settings.active_backup_dir,
+            backup_type="pre-paypal-import-safety",
+        )
+        import_paypal_batch(factory, batch_id, settings)
+    else:
+        import_sparda_batch(factory, batch_id, get_settings())
     return RedirectResponse(f"/import?batch_id={batch_id}", status_code=303)
 
 

@@ -1,9 +1,8 @@
 # Importe
 
-Phase 2A stellt die sichere lokale Importgrenze bereit. Seit Phase 2B ist Sparda CSV
-der einzige produktive Adapter. PayPal CSV, Amex CSV/PDF und Amazon-Daten werden
-weiterhin nur bereitgestellt und validiert; für sie existieren keine produktiven
-Parser.
+Phase 2A stellt die sichere lokale Importgrenze bereit. Sparda CSV und PayPal CSV
+besitzen produktive Adapter. Amex CSV/PDF und Amazon-Daten werden weiterhin nur
+bereitgestellt und validiert; für sie existieren keine produktiven Parser.
 
 ## Staging und Validierung
 
@@ -17,17 +16,17 @@ verschlüsselte Archive führen zur Quarantäne. Eingebetteter Inhalt wird nie a
 
 Im Demo-Profil liegen valide Originale unter `data/private/imports/staging/` und
 abgewiesene Originale unter `data/private/imports/quarantine/`. Dieses Profil
-erlaubt Vorschauen, sperrt aber jeden produktiven Sparda-Import. Im Privat-Profil
+erlaubt Vorschauen, sperrt aber jeden produktiven Import. Im Privat-Profil
 liegen die entsprechenden Dateien getrennt unter
 `data/private/profiles/private/imports/staging/` beziehungsweise `quarantine/`;
 seine Datenbank ist `data/private/profiles/private/moneyos.db`. Die Dateien tragen
 einen Hashnamen. Eine Quarantäne speichert maschinenlesbare Fehlercodes am Batch;
 es findet kein Teilimport statt. Die UI gibt weder Rohinhalt noch Dateinamen aus.
 
-Unterstützte Staging-Formate (nur Sparda ist bereits produktiv):
+Unterstützte Staging-Formate:
 
-- Sparda/Bank: `.csv`
-- PayPal: `.csv`
+- Sparda/Bank: `.csv` (produktiv)
+- PayPal: `.csv` (produktiv)
 - American Express: `.csv`, `.pdf`
 - Amazon: `.csv`, `.json`, `.zip`
 
@@ -55,8 +54,8 @@ Deterministische Klassifikation:
 
 - American Express und Amazon Visa-Abrechnungen: Transfer/Settlement, niemals
   gewöhnliche Ausgabe; Amazon Visa erzeugt zusätzlich `missing_card_source`.
-- PayPal Europe: Transfer/Funding-Leg; die spätere Händlerausgabe darf nur aus dem
-  noch nicht implementierten PayPal-Adapter entstehen.
+- PayPal Europe: Transfer/Funding-Leg; die Händlerausgabe darf nur aus dem
+  PayPal-Adapter entstehen.
 - Bargeldabhebung: Transfer; ohne eindeutiges Ziel Review für Portemonnaie/Tresor.
 - Gehalt, Bundesagentur, Familienkasse/Kindergeld und klar erkennbares Finanzamt:
   Einkommen.
@@ -93,6 +92,32 @@ Zusammenfassung nennt Quellzeilen, neue Raw-/Source-Datensätze, Economic Events
 Typzählungen, Reviews, Zeilen-/Dateiduplikate und Fehlzeilen, niemals IBAN/BIC,
 Gläubiger-ID, Mandatsreferenz oder Raw-Zahlungsidentifikatoren.
 
+## Produktiver PayPal-Adapter
+
+Der Adapter `app/importers/paypal.py` liest UTF-8/UTF-8-BOM und erkennt Komma-
+beziehungsweise Semikolon-CSV. Geldwerte werden ausschließlich als `Decimal`
+normalisiert. Jede neue Zeile erzeugt einen unveränderlichen Raw Record und eine
+normalisierte Source Transaction; Transaktionscode und zugehöriger
+Transaktionscode bilden stabile Gruppen und Fingerprints.
+
+Abgeschlossene Händlerzahlungen erzeugen genau ein Expense Event pro Händlerzeile.
+Rückzahlungen erzeugen Refund Events und werden bei eindeutiger Referenz additiv
+mit dem Ursprung verknüpft. Funding-, Kreditkarten-, Autorisierungs-, Hold- und
+Release-Zeilen sind technische Quellen: Sie erzeugen niemals eine zweite Ausgabe.
+Unbekannte oder mehrdeutige Zeilen erzeugen nur ein Review Item.
+
+PayPal-Funding wird konservativ mit bestehenden Sparda-Quellen abgeglichen.
+Explizite Referenz plus Betrag oder ein eindeutiger Betrag im engen Datumsfenster
+gilt als hohe Konfidenz und wird nur als zusätzlicher Source Link an das bereits
+existierende PayPal-Händlerereignis angehängt. Mittlere und mehrdeutige Treffer
+bleiben im Review. Die Quelltransaktionen werden nicht verändert.
+
+Vor der bestätigten Ausführung erzeugt die Webroute automatisch ein lokales
+Safety-Backup. Der rein lesende Vorabtest ist im Privat-Profil möglich mit
+`python -m app.ops audit-paypal PFAD-ZUR-DATEI.CSV`. Er meldet ausschließlich
+Aggregate, Datumsbereich, Duplikate und Match-Stufen; er legt weder Batch noch
+Staging-Datei oder Finanzdatensatz an.
+
 Vor privaten Daten muss die App mit `MONEYOS_DEMO_MODE=false` neu gestartet
 werden. Die Seitenleiste muss `Privat-Profil` anzeigen. Eine bereits im
 Demo-Profil bereitgestellte Datei wird nicht übernommen: Das Original wird im
@@ -114,7 +139,7 @@ kanonischen Link höchstens ein wirtschaftliches Ereignis begründen.
 
 ## Atomarität und Löschen
 
-Der künftige Parser wird ausschließlich über den atomaren Importservice aufgerufen.
+Jeder produktive Parser wird ausschließlich über den atomaren Importservice aufgerufen.
 Entweder werden Raw Records, Source Transactions und Economic Events gemeinsam
 committed oder vollständig zurückgerollt. Ein fehlgeschlagener Batch darf für die
 Diagnose bestehen bleiben. Hash plus eindeutige Source-Fingerprints verhindern

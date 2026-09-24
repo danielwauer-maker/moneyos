@@ -4,8 +4,9 @@ MoneyOS ist eine lokale persönliche Finanz-Web-App mit FastAPI, SQLAlchemy, SQL
 Alembic und Jinja2; die Templates sind für lokale HTMX-Interaktionen vorbereitet.
 Phase 2A ergänzt ein privates lokales Datei-Staging, Validierung und Quarantäne,
 atomare Importgrenzen, Backups/Restore, Aufbewahrungsregeln und eine Diagnose.
-Phase 2B enthält den produktiven Sparda-CSV-Adapter. PayPal-, Amex- und Amazon-
-Parser sind bewusst noch nicht enthalten.
+Phase 2B enthält den produktiven Sparda-CSV-Adapter; Phase 2C ergänzt den
+produktiven PayPal-CSV-Adapter mit konservativem Sparda-Funding-Matching. Amex-
+und Amazon-Parser sind bewusst noch nicht enthalten.
 
 ## Voraussetzungen
 
@@ -108,14 +109,16 @@ sind vollständig fiktiv. Docker veröffentlicht Port 8000 ausschließlich auf
 Vor einem realen Import in `.env` `MONEYOS_DEMO_MODE=false` setzen und die App neu
 starten. Das Privat-Profil verwendet standardmäßig
 `data/private/profiles/private/moneyos.db`; die Seitenleiste muss danach
-`Privat-Profil` anzeigen. Im Demo-Profil ist der produktive Sparda-Import hart
+`Privat-Profil` anzeigen. Im Demo-Profil ist jeder produktive Import hart
 gesperrt und Demo-Daten werden nie in die private Datenbank übernommen.
 
 Danach `python -m app.ops diagnostics` ausführen und den realen Sparda-Export auf
 der Seite `Import` neu auswählen. MoneyOS validiert und zeigt zunächst eine
 redigierte Vorschau; importiert wird erst nach „Atomaren Import starten“. Eine
 zuvor im Demo-Profil bereitgestellte Datei wird absichtlich nicht profilübergreifend
-übernommen. PayPal-, Amex- und Amazon-Parser bleiben spätere, getrennte Adapter.
+übernommen. PayPal besitzt eine eigene redigierte Vorschau und wird erst nach
+ausdrücklicher Bestätigung und automatischem Safety-Backup atomar importiert.
+Amex und Amazon bleiben spätere, getrennte Adapter.
 
 Nach dem ersten Sparda-Import werden die bestätigten privaten Konto- und
 Umschlagstammdaten samt additivem Kontobackfill einmalig beziehungsweise beliebig

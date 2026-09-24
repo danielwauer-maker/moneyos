@@ -217,6 +217,13 @@ def stage_upload(
                 parse_sparda_csv(staged_path)
             except SpardaFormatError as exc:
                 issues.append(ValidationIssue(exc.code, exc.message))
+        elif source_type == "paypal" and not issues:
+            from app.importers.paypal import PayPalFormatError, parse_paypal_csv
+
+            try:
+                parse_paypal_csv(staged_path)
+            except PayPalFormatError as exc:
+                issues.append(ValidationIssue(exc.code, exc.message))
 
         if issues:
             quarantine_path = settings.quarantine_dir / stored_filename

@@ -1,24 +1,55 @@
-TECHNICAL_TYPES = {
-    "Allgemeine Gutschrift auf Kreditkarte",
-    "Allgemeine Abbuchung von Kreditkarte",
-    "Bankgutschrift auf PayPal-Konto",
-    "Allgemeine Autorisierung",
-    "Einbehaltung für offene Autorisierung",
-    "Rückbuchung allgemeiner Einbehaltung",
-}
+from decimal import Decimal
+
+TECHNICAL_TYPES = frozenset(
+    {
+        "allgemeine gutschrift auf kreditkarte",
+        "allgemeine abbuchung von kreditkarte",
+        "bankgutschrift auf paypal-konto",
+        "allgemeine autorisierung",
+        "einbehaltung für offene autorisierung",
+        "rückbuchung allgemeiner einbehaltung",
+    }
+)
 
 COMPLETED_PURCHASE_TYPES = {
-    "Zahlung",
-    "Allgemeine Zahlung",
-    "Express-Kaufabwicklung",
+    "zahlung",
+    "allgemeine zahlung",
+    "express-kaufabwicklung",
 }
 
 
 def classify_paypal_type(transaction_type: str) -> str | None:
-    if transaction_type in TECHNICAL_TYPES:
+    key = transaction_type.casefold().strip()
+    if key in TECHNICAL_TYPES or any(
+        marker in key
+        for marker in ("autorisierung", "einbehaltung", "authorization", "temporary hold")
+    ):
         return None
-    if transaction_type == "Rückzahlung":
+    if "rückzahlung" in key or "refund" in key:
         return "refund"
-    if transaction_type in COMPLETED_PURCHASE_TYPES:
+    if key in COMPLETED_PURCHASE_TYPES:
         return "expense"
     return "review"
+
+
+def classify_paypal_semantic(
+    transaction_type: str,
+    status: str,
+    gross: Decimal,
+    *,
+    has_name: bool,
+) -> str:
+    """Return a conservative, mutually exclusive PayPal row semantic."""
+    key = transaction_type.casefold().strip()
+    if classify_paypal_type(transaction_type) is None:
+        return (
+            "funding"
+            if key in TECHNICAL_TYPES
+            and any(marker in key for marker in ("kreditkarte", "bankgutschrift"))
+            else "technical"
+        )
+    if classify_paypal_type(transaction_type) == "refund":
+        return "refund"
+    if status.casefold().strip() in {"abgeschlossen", "completed"} and gross < 0 and has_name:
+        return "merchant_payment"
+    return "unresolved"

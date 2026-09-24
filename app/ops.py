@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.db.session import SessionLocal
+from app.importers.paypal import dry_run_paypal_file
 from app.services.backup import create_backup, restore_backup
 from app.services.balance_confirmations import backfill_sparda_imported_balance
 from app.services.diagnostics import diagnostics_as_dicts
@@ -52,6 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
         "audit-sparda-details",
         help="Read-only audit of Sparda secondary details and category suggestions",
     )
+    paypal_audit = commands.add_parser(
+        "audit-paypal",
+        help="Read-only structural and matching audit of a local PayPal CSV",
+    )
+    paypal_audit.add_argument("file", type=Path)
     return parser
 
 
@@ -136,6 +142,12 @@ def main() -> None:
             raise ValueError("audit-sparda-details requires MONEYOS_DEMO_MODE=false")
         with SessionLocal() as db:
             report = audit_sparda_transaction_details(db)
+        print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
+    elif args.command == "audit-paypal":
+        if settings.demo_mode:
+            raise ValueError("audit-paypal requires MONEYOS_DEMO_MODE=false")
+        with SessionLocal() as db:
+            report = dry_run_paypal_file(args.file, db)
         print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
 
 

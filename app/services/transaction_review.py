@@ -225,6 +225,12 @@ def _load_rows(db: Session) -> list[TransactionReviewRow]:
         key = _key(source.id)
         event = event_by_source.get(source.id)
         review = review_by_source.get(source.id)
+        if (
+            source.source_system == "paypal"
+            and (source.metadata_json or {}).get("technical") is True
+            and review is None
+        ):
+            continue
         detail = derive_transaction_detail(
             source, None, fallback=event.description if event else source.description_raw
         )

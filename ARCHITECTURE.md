@@ -34,7 +34,7 @@ Demo- und Privat-Profil besitzen getrennte Datenbanken und getrennte operative
 Verzeichnisse. `MONEYOS_DEMO_MODE=true` verwendet weiterhin `data/moneyos.db` und
 `data/private/imports/`; `false` verwendet standardmäßig
 `data/private/profiles/private/moneyos.db` und ausschließlich Unterverzeichnisse
-von `data/private/profiles/private/`. Produktive Sparda-Imports sind im
+von `data/private/profiles/private/`. Produktive Sparda- und PayPal-Imports sind im
 Demo-Profil auf Service- und HTTP-Ebene gesperrt. Der Demo-Seed beendet sich im
 Privat-Profil ohne Schreibzugriff.
 
@@ -123,6 +123,15 @@ fachlichen Klassifikation in `app/domain/sparda.py` getrennt. Der Domainteil ruf
 für jeden sicheren Typ den zentralen Account-Movement-Klassifizierer auf. Routen
 und Templates orchestrieren nur Vorschau bzw. Start und enthalten keine
 Finanzklassifikation.
+
+Der produktive PayPal-Adapter liegt in `app/importers/paypal.py`. Er gruppiert
+Händler-, Funding-, Autorisierungs- und Refund-Zeilen über stabile PayPal-
+Transaktionsbeziehungen. Nur Händlerzahlungen und Refunds werden zu Economic
+Events. Technische Zeilen bleiben eigene unveränderliche Quellen und können als
+`funding_leg`, `authorization` oder `enrichment` auf dasselbe Event zeigen.
+Sparda-Matches sind additive Links; bestehende Sparda-Events und Quellen werden
+nicht umgeschrieben. Rein technische Quellen ohne offenen Ausnahmefall werden in
+der chronologischen Review-Ansicht ausgeblendet.
 
 ## Schutzmodell
 

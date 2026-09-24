@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 from app.config import get_settings
 from app.db.models import (
     Account,
-    Category,
     EconomicEvent,
     Envelope,
     ImportBatch,
@@ -40,6 +39,7 @@ from app.services.balance_confirmations import (
 )
 from app.services.categories import (
     category_groups,
+    category_selector_groups,
     create_category,
     rename_category,
     set_category_active,
@@ -529,9 +529,7 @@ def transaction_review(request: Request, db: DbSession) -> HTMLResponse:
             db.scalars(select(Project).where(Project.status == "active").order_by(Project.name))
         ),
         accounts=list(db.scalars(select(Account).where(Account.is_active).order_by(Account.name))),
-        categories=list(
-            db.scalars(select(Category).where(Category.is_active).order_by(Category.name))
-        ),
+        category_selector_groups=category_selector_groups(db),
         envelopes=list(
             db.scalars(select(Envelope).where(Envelope.is_active).order_by(Envelope.sort_order))
         ),
@@ -682,9 +680,7 @@ def review(request: Request, db: DbSession) -> HTMLResponse:
             )
             for row in rows
         ],
-        categories=list(
-            db.scalars(select(Category).where(Category.is_active).order_by(Category.name))
-        ),
+        category_selector_groups=category_selector_groups(db),
         envelopes=list(
             db.scalars(select(Envelope).where(Envelope.is_active).order_by(Envelope.sort_order))
         ),

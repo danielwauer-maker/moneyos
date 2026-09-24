@@ -264,3 +264,53 @@ def test_suggestion_rule_never_overwrites_manual_category(db: Session) -> None:
     row = build_transaction_review(db)[0][0]
     assert row.category.id == manual.id
     assert row.proposed_category.id == suggested.id
+
+
+def test_category_picker_order_is_shared_across_review_workflows(db: Session) -> None:
+    zulu = Category(name="Zulu")
+    alpha = Category(name="Alpha")
+    db.add_all([zulu, alpha])
+    db.flush()
+    db.add_all(
+        [
+            Category(name="Zweite", parent_id=alpha.id),
+            Category(name="Erste", parent_id=alpha.id),
+            Category(name="Kind", parent_id=zulu.id),
+        ]
+    )
+    source = _source(db, "shared-picker", 11)
+    db.add(
+        ReviewItem(
+            source_transaction_id=source.id,
+            review_type="economic_type",
+            proposed_event_type="expense",
+            confidence=Decimal("0.8"),
+            explanation="Synthetische Prüfung",
+        )
+    )
+    db.commit()
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            pages = [
+                client.get("/review"),
+                client.get("/transaction-review"),
+                client.get("/envelope-assignments"),
+            ]
+    finally:
+        app.dependency_overrides.clear()
+
+    for page in pages:
+        assert page.status_code == 200
+        text = page.text
+        alpha_pos = text.index('<optgroup label="Alpha">')
+        zulu_pos = text.index('<optgroup label="Zulu">')
+        first_child_pos = text.index("↳ Erste", alpha_pos)
+        second_child_pos = text.index("↳ Zweite", alpha_pos)
+        assert alpha_pos < zulu_pos
+        assert alpha_pos < first_child_pos < second_child_pos < zulu_pos
+        assert "● Alpha (Hauptkategorie)" in text

@@ -1,7 +1,7 @@
-{% macro category_picker(groups, name, picker_id, blank_label, selected_id='', aria_label='Kategorie', show_search=true) -%}
+{% macro category_picker(groups, name, picker_id, blank_label, selected_id='', aria_label='Kategorie', show_search=true, form_id='') -%}
 <span class="category-picker">
   {% if show_search %}<input type="search" class="category-picker-search" data-category-search="{{ picker_id }}" placeholder="Kategorie suchen …" aria-label="{{ aria_label }} durchsuchen" autocomplete="off">{% endif %}
-  <select name="{{ name }}" id="{{ picker_id }}" aria-label="{{ aria_label }}">
+  <select name="{{ name }}" id="{{ picker_id }}" aria-label="{{ aria_label }}"{% if form_id %} form="{{ form_id }}"{% endif %}>
     <option value="">{{ blank_label }}</option>
     {% for group in groups %}
     <optgroup label="{{ group.parent.name }}">

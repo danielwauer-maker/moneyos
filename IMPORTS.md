@@ -75,6 +75,12 @@ aus `Verwendungszweck`; erst danach folgen Zweck und Gegenpartei als Fallback.
 und Review zeigen redigiert sowohl den rohen Gegenpart als auch den kanonischen
 Händler samt Confidence und Regelgrund.
 
+Dasselbe Muster gilt für Klarna und PayPal: Der Provider bleibt als Gegenpartei und
+`processor` erhalten, während ein klarer Ausdruck wie `Purchase at H+M` vor einer
+`EREF`-Referenz den kanonischen Händler bilden kann. Referenzwerte, Hashes und
+generische Funding-Texte werden verworfen. PayPal-Funding und Settlement bleiben
+Transfers und erzeugen keine zweite Händlerausgabe.
+
 Vorhandene private Sparda-Zeilen werden mit `python -m app.ops reclassify-sparda`
 read-only ausgewertet. `--apply --confirm` legt zuerst ein Safety-Backup an und
 schreibt atomar nur hochkonfidente Kategorien an ungeschützte Economic Events sowie

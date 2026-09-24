@@ -123,6 +123,66 @@ def test_manual_category_decision_is_never_overwritten(db: Session) -> None:
     assert event.category_id == manual_category.id
 
 
+def test_manual_klarna_category_decision_is_never_overwritten(db: Session) -> None:
+    manual_parent = Category(name="Manuell Klarna")
+    db.add(manual_parent)
+    db.flush()
+    manual_category = Category(name="Manuell bestätigt", parent_id=manual_parent.id)
+    db.add(manual_category)
+    db.flush()
+    source = SourceTransaction(
+        source_system="sparda",
+        source_transaction_id="sparda:klarna-manual",
+        booked_at=datetime(2026, 9, 1),
+        merchant_raw="Klarna Bank AB",
+        description_raw="Lastschrift | Purchase at H+M EREF: SYNTHETIC-123",
+        amount=D("-20"),
+        fingerprint="klarna-manual".ljust(64, "0"),
+    )
+    db.add(source)
+    db.flush()
+    event = _event(db, source, manual_category)
+    db.add(
+        CategoryAssignmentDecision(
+            candidate_key=f"source:{source.id}",
+            source_transaction_id=source.id,
+            economic_event_id=event.id,
+            category_id=manual_category.id,
+            decided_at=datetime(2026, 9, 2),
+        )
+    )
+    db.flush()
+
+    report = apply_sparda_reclassification(db)
+
+    assert report.protected_manual_decisions == 1
+    assert event.category_id == manual_category.id
+
+
+def test_high_confidence_klarna_merchant_category_updates_unprotected_event(
+    db: Session,
+) -> None:
+    source = SourceTransaction(
+        source_system="sparda",
+        source_transaction_id="sparda:klarna-hm",
+        booked_at=datetime(2026, 9, 1),
+        merchant_raw="Klarna Bank AB",
+        description_raw="Lastschrift | Purchase at H+M EREF: SYNTHETIC-123",
+        amount=D("-20"),
+        fingerprint="klarna-hm".ljust(64, "0"),
+    )
+    db.add(source)
+    db.flush()
+    event = _event(db, source)
+
+    report = apply_sparda_reclassification(db)
+
+    assert report.auto_confirmed == 1
+    assert event.category is not None
+    assert event.category.parent.name == "Kleidung"
+    assert event.category.name == "Kleidung"
+
+
 def test_review_only_receives_proposal_without_economic_event(db: Session) -> None:
     source = _source(db, "bageri", "ENO BAGERI APS/Street/City/DK/2")
     review = ReviewItem(

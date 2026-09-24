@@ -13,6 +13,7 @@ from app.services.sparda_reclassification import source_classification
 @dataclass(frozen=True)
 class TransactionDetail:
     raw_counterparty: str
+    processor: str | None
     secondary_detail: str
     canonical_merchant: str
     canonical_confidence: str
@@ -33,11 +34,12 @@ def derive_transaction_detail(
 ) -> TransactionDetail:
     if source is None:
         safe = redact_text(fallback)[:160]
-        return TransactionDetail(safe, "", safe, "unknown", "Keine Quelltransaktion")
+        return TransactionDetail(safe, None, "", safe, "unknown", "Keine Quelltransaktion")
     raw_counterparty = redact_text(source.merchant_raw or fallback)[:160]
     if source.source_system != "sparda":
         return TransactionDetail(
             raw_counterparty=raw_counterparty,
+            processor=None,
             secondary_detail=redact_text(source.description_raw or "")[:240],
             canonical_merchant=raw_counterparty,
             canonical_confidence="unknown",
@@ -46,9 +48,10 @@ def derive_transaction_detail(
     decision = source_classification(source, raw)
     merchant = decision.merchant
     if merchant is None:  # defensive; the Sparda classifier always supplies one
-        return TransactionDetail(raw_counterparty, "", raw_counterparty, "unknown", "Offen")
+        return TransactionDetail(raw_counterparty, None, "", raw_counterparty, "unknown", "Offen")
     return TransactionDetail(
         raw_counterparty=redact_text(merchant.raw_counterparty or raw_counterparty)[:160],
+        processor=redact_text(merchant.processor)[:160] if merchant.processor else None,
         secondary_detail=redact_text(merchant.secondary_detail)[:240],
         canonical_merchant=redact_text(merchant.canonical_merchant)[:160],
         canonical_confidence=str(merchant.confidence),

@@ -32,6 +32,17 @@ HIGH_CONFIDENCE = Decimal("0.95")
 MEDIUM_CONFIDENCE = Decimal("0.70")
 
 
+def _provider_name(processor: str | None) -> str | None:
+    if not processor:
+        return None
+    normalized = processor.casefold()
+    if "klarna" in normalized:
+        return "klarna"
+    if "paypal" in normalized:
+        return "paypal"
+    return None
+
+
 @dataclass(frozen=True)
 class ReclassificationCandidate:
     source: SourceTransaction
@@ -89,6 +100,11 @@ class SpardaDetailAudit:
     category_suggestions_would_change: int
     ambiguous_without_category_suggestion: int
     protected_manual_decisions: int
+    klarna_transactions_evaluated: int
+    paypal_counterparty_transactions_evaluated: int
+    merchants_safely_extractable: int
+    category_suggestions_safely_derivable: int
+    ambiguous_provider_cases: int
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -98,6 +114,13 @@ class SpardaDetailAudit:
             "category_suggestions_would_change": self.category_suggestions_would_change,
             "ambiguous_without_category_suggestion": self.ambiguous_without_category_suggestion,
             "protected_manual_decisions": self.protected_manual_decisions,
+            "klarna_transactions_evaluated": self.klarna_transactions_evaluated,
+            "paypal_counterparty_transactions_evaluated": (
+                self.paypal_counterparty_transactions_evaluated
+            ),
+            "merchants_safely_extractable": self.merchants_safely_extractable,
+            "category_suggestions_safely_derivable": self.category_suggestions_safely_derivable,
+            "ambiguous_provider_cases": self.ambiguous_provider_cases,
         }
 
 
@@ -287,6 +310,18 @@ def plan_sparda_reclassification(db: Session) -> ReclassificationReport:
 
 def audit_sparda_transaction_details(db: Session) -> SpardaDetailAudit:
     candidates = _load_candidates(db)
+    provider_candidates = [
+        item
+        for item in candidates
+        if item.merchant.processor is not None
+        and _provider_name(item.merchant.processor) in {"klarna", "paypal"}
+    ]
+    safely_extractable = [
+        item
+        for item in provider_candidates
+        if item.merchant.source == "payment_detail" and item.merchant.unambiguous
+    ]
+    safely_derivable = [item for item in safely_extractable if item.suggestion is not None]
     changes = 0
     for candidate in candidates:
         if candidate.suggestion is None or candidate.protected or candidate.action == "unresolved":
@@ -308,6 +343,15 @@ def audit_sparda_transaction_details(db: Session) -> SpardaDetailAudit:
         category_suggestions_would_change=changes,
         ambiguous_without_category_suggestion=sum(item.suggestion is None for item in candidates),
         protected_manual_decisions=sum(item.protected for item in candidates),
+        klarna_transactions_evaluated=sum(
+            _provider_name(item.merchant.processor) == "klarna" for item in candidates
+        ),
+        paypal_counterparty_transactions_evaluated=sum(
+            _provider_name(item.merchant.processor) == "paypal" for item in candidates
+        ),
+        merchants_safely_extractable=len(safely_extractable),
+        category_suggestions_safely_derivable=len(safely_derivable),
+        ambiguous_provider_cases=len(provider_candidates) - len(safely_extractable),
     )
 
 

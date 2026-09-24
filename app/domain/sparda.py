@@ -25,6 +25,7 @@ class CategorySuggestion:
 @dataclass(frozen=True)
 class MerchantExtraction:
     raw_counterparty: str
+    processor: str | None
     canonical_merchant: str
     secondary_detail: str
     source: str
@@ -78,6 +79,10 @@ GENERIC_COUNTERPARTIES = (
     "WORLDLINE",
     "NEXI",
     "SUMUP",
+    "KLARNA BANK AB",
+    "KLARNA",
+    "PAYPAL EUROPE",
+    "PAYPAL",
 )
 
 
@@ -86,6 +91,15 @@ def _is_generic_counterparty(counterparty: str) -> bool:
     return any(
         normalized == item or normalized.startswith(f"{item} ") for item in GENERIC_COUNTERPARTIES
     )
+
+
+def _payment_processor(counterparty: str) -> str | None:
+    normalized = _searchable(counterparty)
+    if normalized.startswith("KLARNA"):
+        return _display_text(counterparty)[:160]
+    if normalized.startswith("PAYPAL"):
+        return _display_text(counterparty)[:160]
+    return None
 
 
 def _structured_card_merchant(purpose: str) -> str | None:
@@ -123,10 +137,57 @@ def _useful_secondary_detail(
     return ""
 
 
+def _intermediary_detail_merchant(*, processor: str, detail: str) -> str | None:
+    """Extract a merchant only from explicit provider detail, never from IDs."""
+    searchable_processor = _searchable(processor)
+    if not detail or not any(
+        searchable_processor.startswith(prefix) for prefix in ("KLARNA", "PAYPAL")
+    ):
+        return None
+    candidate: str | None = None
+    patterns = (
+        r"(?:PURCHASE\s+AT|KAUF\s+BEI|ZAHLUNG\s+AN|PAYMENT\s+TO)\s+(.+)",
+        r"(?:PAYPAL\s*[*:/-]\s*)(.+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, detail, flags=re.IGNORECASE)
+        if match:
+            candidate = match.group(1)
+            break
+    if candidate is None and re.search(r"\bEREF\s*:", detail, flags=re.IGNORECASE):
+        candidate = re.split(r"\bEREF\s*:", detail, maxsplit=1, flags=re.IGNORECASE)[0]
+    if candidate is None:
+        return None
+    candidate = re.split(
+        r"\b(?:EREF|REFERENCE|TRANSACTION\s+ID|TRANSACTIONID)\b",
+        candidate,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    candidate = _display_text(candidate).strip("*:;,-")
+    normalized = _searchable(candidate)
+    if not candidate or len(candidate) < 2 or not re.search(r"[A-ZÄÖÜa-zäöüß]", candidate):
+        return None
+    if normalized in {
+        "INSTANT TRANSFER",
+        "TRANSFER",
+        "FUNDING",
+        "GUTHABEN",
+        "PAYPAL",
+        "KLARNA",
+        "KLARNA BANK AB",
+    }:
+        return None
+    if re.fullmatch(r"[A-Z0-9_-]{8,}", candidate, flags=re.IGNORECASE):
+        return None
+    return candidate[:160]
+
+
 def extract_sparda_merchant(
     *, counterparty: str, booking_text: str, purpose: str, note: str = ""
 ) -> MerchantExtraction:
     raw_counterparty = _display_text(counterparty)
+    processor = _payment_processor(raw_counterparty)
     detail = _useful_secondary_detail(
         counterparty=counterparty,
         booking_text=booking_text,
@@ -139,9 +200,37 @@ def extract_sparda_merchant(
         if any(token in booking for token in ("KARTENZAHLUNG", "DEBIT MC", "MAESTRO"))
         else None
     )
+    if processor:
+        intermediary_merchant = _intermediary_detail_merchant(
+            processor=processor,
+            detail=detail,
+        )
+        if intermediary_merchant:
+            return MerchantExtraction(
+                raw_counterparty=raw_counterparty,
+                processor=processor,
+                canonical_merchant=intermediary_merchant,
+                secondary_detail=detail,
+                source="payment_detail",
+                confidence=Decimal("0.98"),
+                reason="Expliziter Händler im Klarna-/PayPal-Zahlungsdetail",
+                unambiguous=True,
+            )
+        if processor:
+            return MerchantExtraction(
+                raw_counterparty=raw_counterparty,
+                processor=processor,
+                canonical_merchant=raw_counterparty or "Unbekannter Zahlungspartner",
+                secondary_detail=detail,
+                source="generic_counterparty",
+                confidence=Decimal("0.30"),
+                reason="Provider-Detail enthält keinen sicheren Händlernamen",
+                unambiguous=False,
+            )
     if structured_detail:
         return MerchantExtraction(
             raw_counterparty=raw_counterparty,
+            processor=processor,
             canonical_merchant=structured_detail,
             secondary_detail=detail,
             source="payment_detail",
@@ -152,6 +241,7 @@ def extract_sparda_merchant(
     if raw_counterparty and not _is_generic_counterparty(raw_counterparty):
         return MerchantExtraction(
             raw_counterparty=raw_counterparty,
+            processor=processor,
             canonical_merchant=raw_counterparty[:160],
             secondary_detail=detail,
             source="counterparty",
@@ -163,6 +253,7 @@ def extract_sparda_merchant(
         candidate = _structured_card_merchant(detail) or detail[:160]
         return MerchantExtraction(
             raw_counterparty=raw_counterparty,
+            processor=processor,
             canonical_merchant=candidate,
             secondary_detail=detail,
             source="purpose",
@@ -173,6 +264,7 @@ def extract_sparda_merchant(
     fallback = raw_counterparty or _display_text(booking_text) or "Unbekannter Zahlungspartner"
     return MerchantExtraction(
         raw_counterparty=raw_counterparty,
+        processor=processor,
         canonical_merchant=fallback[:160],
         secondary_detail=detail,
         source="generic_counterparty",
@@ -243,6 +335,22 @@ CATEGORY_RULES: tuple[_CategoryRule, ...] = (
         "Parken",
         Decimal("0.98"),
         "Spezifischer Parkanbieter",
+    ),
+    _CategoryRule(
+        (
+            r"\bH\+M\b",
+            r"\bH & M\b",
+            r"\bZALANDO\b",
+            r"\bC&A\b",
+            r"\bPRIMARK\b",
+            r"\bUNIQLO\b",
+            r"\bABOUT YOU\b",
+            r"\bZARA\b",
+        ),
+        "Kleidung",
+        "Kleidung",
+        Decimal("0.98"),
+        "Spezifisches Bekleidungsmuster",
     ),
     _CategoryRule(
         (r"\bDM[- ]?FIL", r"\bDM DROGERIE", r"\bROSSMANN\b"),
@@ -474,12 +582,16 @@ def classify_sparda_transaction(
             link_type="settlement_leg",
             merchant=merchant,
         )
-    if "PAYPAL EUROPE" in text:
+    if "PAYPAL EUROPE" in text or (
+        _payment_processor(counterparty)
+        and _searchable(_payment_processor(counterparty) or "").startswith("PAYPAL")
+    ):
         return SpardaDecision(
             classify_account_movement(AccountMovementKind.OWN_ACCOUNT_TRANSFER),
             Decimal("1"),
             "paypal_funding_leg",
             link_type="funding_leg",
+            category=category if merchant.unambiguous else None,
             merchant=merchant,
         )
     if "ABRECHNUNG AMAZON VISA" in text or ("AMAZON VISA" in text and "ABRECHNUNG" in text):

@@ -390,6 +390,7 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
                 "canonical_merchant": (
                     decision.merchant.canonical_merchant if decision.merchant else None
                 ),
+                "payment_processor": decision.merchant.processor if decision.merchant else None,
                 "merchant_source": decision.merchant.source if decision.merchant else None,
                 "target_account_type": decision.target_account_type,
             },

@@ -101,6 +101,8 @@ reine Anzeigesicht aus ursprünglicher Gegenpartei, informativer zweiter Detailz
 und kanonischem Händler. Tabellen zeigen die Gegenpartei zuerst; der kanonische
 Händler dient nur zuverlässiger Gruppierung, Regeln und Kategorie-Vorschlägen. Die
 Ableitung schreibt keine Werte in Raw Records oder Source Transactions.
+Die gleiche, konservative Ableitung erkennt Klarna-/PayPal-Provider nur aus
+explizitem Detailtext; Referenz- und Funding-Token werden nicht kanonisiert.
 
 `app/services/import_staging.py` übernimmt Streaming, SHA-256, unveränderte lokale
 Ablage, Dateityp-/Inhaltsprüfung und Quarantäne. Erst ein Batch im Zustand `valid`

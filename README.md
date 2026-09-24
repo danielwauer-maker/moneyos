@@ -200,6 +200,11 @@ verfügbar. Kategorieauswahl und -filter sind alphabetisch nach Hauptkategorie
 gruppiert, Unterkategorien stehen direkt darunter und können ohne Frontend-Framework
 durchsucht werden.
 
+Klarna und PayPal werden als Zahlungsintermediäre getrennt vom kanonischen Händler
+geführt. Nur explizite Detailangaben wie `Purchase at H+M` werden als Händler-
+Vorschlag verwendet; EREF-/Transaktions-IDs und `INSTANT TRANSFER` bleiben außen
+vor. Reine Provider-Funding- und Settlement-Zeilen bleiben Transfers.
+
 Der ausschließlich lesende Detail-Audit für das Privatprofil lautet:
 
 ```powershell

@@ -58,6 +58,12 @@ kanonischen Händler, danach das sekundäre Detail und erst zuletzt die Gegenpar
 Der Vorschlagsgrund nennt das auslösende Feld; unzuverlässige Prozessor-Fallbacks
 werden nicht als gemeinsame Händlergruppe behandelt.
 
+Klarna Bank AB und PayPal gelten als Zahlungsintermediäre. Ein expliziter Händler
+im sekundären Detail (z. B. `Purchase at H+M`) darf kanonisch als Händler erkannt
+werden. EREF-, Transaktions- und Hashwerte sowie `INSTANT TRANSFER` sind niemals
+Händler. Reine PayPal-Funding-/Settlement-Zeilen bleiben Transfers; Klarna- oder
+PayPal-Fälle ohne sicheren Händler bleiben Review beziehungsweise ungeklärt.
+
 Die optimierte Hierarchie umfasst: Einnahmen; Lebensmittel; Gastronomie; Wohnen &
 Haushalt; Drogerie & Körperpflege; Gesundheit; Auto & Mobilität; Kommunikation;
 Abos & Digitales; Versicherungen; Kleidung; Freizeit; Geschenke; Spenden &

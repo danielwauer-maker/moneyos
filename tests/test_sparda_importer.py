@@ -414,6 +414,68 @@ def test_missing_secondary_detail_stays_empty() -> None:
     assert merchant.canonical_merchant == "Fiktiver Zahlungspartner"
 
 
+def test_klarna_detail_extracts_explicit_h_and_m_merchant() -> None:
+    merchant = extract_sparda_merchant(
+        counterparty="Klarna Bank AB",
+        booking_text="Lastschrift",
+        purpose="Purchase at H+M EREF: SYNTHETIC-123",
+    )
+    suggestion = suggest_sparda_category(
+        "Klarna Bank AB", "Lastschrift", "Purchase at H+M EREF: SYNTHETIC-123"
+    )
+
+    assert merchant.processor == "Klarna Bank AB"
+    assert merchant.secondary_detail == "Purchase at H+M EREF: SYNTHETIC-123"
+    assert merchant.canonical_merchant == "H+M"
+    assert merchant.unambiguous is True
+    assert suggestion is not None
+    assert suggestion.path == "Kleidung / Kleidung"
+    assert suggestion.matched_field == "Buchungsdetail"
+
+
+def test_paypal_detail_extracts_explicit_merchant_without_using_reference_id() -> None:
+    merchant = extract_sparda_merchant(
+        counterparty="PAYPAL",
+        booking_text="Lastschrift",
+        purpose="PAYPAL *H&M EREF: SYNTHETIC-456",
+    )
+
+    assert merchant.processor == "PAYPAL"
+    assert merchant.canonical_merchant == "H&M"
+    assert "SYNTHETIC" not in merchant.canonical_merchant
+    assert merchant.unambiguous is True
+
+
+def test_generic_paypal_funding_does_not_extract_or_categorize_merchant() -> None:
+    decision = classify_sparda_transaction(
+        amount=D("-25"),
+        counterparty="PAYPAL EUROPE",
+        booking_text="Lastschrift",
+        purpose="INSTANT TRANSFER EREF: SYNTHETIC-789",
+    )
+
+    assert decision.semantic == "paypal_funding_leg"
+    assert decision.event_type == "transfer"
+    assert decision.category is None
+    assert decision.merchant is not None
+    assert decision.merchant.unambiguous is False
+
+
+def test_generic_klarna_reference_stays_ambiguous() -> None:
+    decision = classify_sparda_transaction(
+        amount=D("-15"),
+        counterparty="Klarna Bank AB",
+        booking_text="Lastschrift",
+        purpose="EREF: SYNTHETIC-999",
+    )
+
+    assert decision.event_type is None
+    assert decision.review_type == "economic_type"
+    assert decision.category is None
+    assert decision.merchant is not None
+    assert decision.merchant.unambiguous is False
+
+
 @pytest.mark.parametrize(
     ("detail", "expected"),
     [

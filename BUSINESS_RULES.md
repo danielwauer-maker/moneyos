@@ -40,3 +40,26 @@ Vermögen addiert. Freies Tresorgeld = Tresor gesamt − physische Umschläge.
 Abgleich: positive Deltas werden eingezahlt, negative entnommen. Transfer-Geld ist
 das Minimum beider Summen. Der Restbedarf wird zuerst mit freiem Tresorgeld und
 erst danach durch eine Giro-Abhebung gedeckt. Transfer-Geld ist kein Banktransfer.
+
+## Kategorien und Händler
+
+Kategorie beschreibt den wirtschaftlichen Zweck, Umschlag die physische
+Finanzierungsquelle und Projekt den größeren Kontext. Umschlagnamen wie Urlaub,
+Vergnügen oder Fix werden nicht allein deshalb als Kategorien verwendet.
+
+Bei Sparda-Kartenumsätzen hat ein strukturierter Händler im Zahlungsdetail Vorrang
+vor einem generischen Prozessor. Verwendungszweck folgt danach; der generische
+Zahlungspartner ist nur Fallback. `DZ BANK AG` allein begründet niemals eine
+Tankstellen- oder andere Ausgabenkategorie.
+
+Die optimierte Hierarchie umfasst: Einnahmen; Lebensmittel; Gastronomie; Wohnen &
+Haushalt; Drogerie & Körperpflege; Gesundheit; Auto & Mobilität; Kommunikation;
+Abos & Digitales; Versicherungen; Kleidung; Freizeit; Geschenke; Spenden &
+Unterstützung; Reisen; Bank & Gebühren; Sonstiges. Die vollständigen Unterkategorien
+sind als `OPTIMIZED_CATEGORY_HIERARCHY` in `app/services/categories.py` definiert
+und werden idempotent als Stammdaten sichergestellt.
+
+Hohe Confidence darf ein bestehendes Economic Event nur ohne bestätigte manuelle
+Kategorieentscheidung aktualisieren. Mittlere Confidence erzeugt nur einen
+Vorschlag. Review-only-Quellen erhalten ebenfalls nur Vorschläge und niemals ein
+geratenes Economic Event.

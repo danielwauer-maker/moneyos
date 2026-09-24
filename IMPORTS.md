@@ -68,6 +68,19 @@ Deterministische Klassifikation:
 - Unklare Belastungen/Gutschriften erzeugen eine Source Transaction und Review,
   aber kein geratenes Economic Event.
 
+Bei Kartenumsätzen ist `Name Zahlungsbeteiligter` häufig nur ein Prozessor. Der
+Adapter extrahiert deshalb einen strukturierten Händler vor dem ersten Detailtrenner
+aus `Verwendungszweck`; erst danach folgen Zweck und Gegenpartei als Fallback.
+`DZ BANK AG` ohne spezifisches Detail ist niemals eine Kategorie-Evidenz. Vorschau
+und Review zeigen redigiert sowohl den rohen Gegenpart als auch den kanonischen
+Händler samt Confidence und Regelgrund.
+
+Vorhandene private Sparda-Zeilen werden mit `python -m app.ops reclassify-sparda`
+read-only ausgewertet. `--apply --confirm` legt zuerst ein Safety-Backup an und
+schreibt atomar nur hochkonfidente Kategorien an ungeschützte Economic Events sowie
+Vorschläge an Reviews. Raw Records und Source Transactions bleiben unverändert;
+eine `category_assignment_decision` sperrt jede automatische Überschreibung.
+
 Die Importseite führt nach erfolgreichem Staging zuerst in eine redigierte
 Vorschau. Erst die ausdrückliche Bestätigung startet den atomaren Import. Die
 Zusammenfassung nennt Quellzeilen, neue Raw-/Source-Datensätze, Economic Events,

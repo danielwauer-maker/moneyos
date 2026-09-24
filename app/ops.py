@@ -12,6 +12,10 @@ from app.services.diagnostics import diagnostics_as_dicts
 from app.services.import_staging import delete_staged_file
 from app.services.private_profile import initialize_private_profile
 from app.services.retention import apply_retention, plan_retention
+from app.services.sparda_reclassification import (
+    apply_sparda_reclassification,
+    plan_sparda_reclassification,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,6 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
     delete = commands.add_parser("delete-staged", help="Delete one retained import file")
     delete.add_argument("batch_id", type=int)
     delete.add_argument("--confirm", action="store_true")
+    reclassify = commands.add_parser(
+        "reclassify-sparda",
+        help="Dry-run or apply safe Sparda merchant/category reclassification",
+    )
+    reclassify.add_argument("--apply", action="store_true")
+    reclassify.add_argument("--confirm", action="store_true")
     return parser
 
 
@@ -97,6 +107,25 @@ def main() -> None:
         with SessionLocal() as db:
             delete_staged_file(db, args.batch_id, settings, confirm=args.confirm)
             print(f"deleted staged file for batch {args.batch_id}")
+    elif args.command == "reclassify-sparda":
+        if settings.demo_mode:
+            raise ValueError("reclassify-sparda requires MONEYOS_DEMO_MODE=false")
+        if not args.apply:
+            with SessionLocal() as db:
+                report = plan_sparda_reclassification(db)
+            print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
+        else:
+            if not args.confirm:
+                raise ValueError("reclassify-sparda --apply requires --confirm")
+            backup = create_backup(
+                settings.active_database_url,
+                settings.active_backup_dir,
+                backup_type="safety",
+            )
+            with SessionLocal.begin() as db:
+                report = apply_sparda_reclassification(db)
+            print(f"safety_backup={backup}")
+            print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
 
 
 if __name__ == "__main__":

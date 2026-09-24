@@ -26,7 +26,11 @@ from app.db.models import (
     SourceTransaction,
 )
 from app.db.session import get_db
-from app.domain.sparda import classify_sparda_transaction, suggest_sparda_category
+from app.domain.sparda import (
+    classify_sparda_transaction,
+    extract_sparda_merchant,
+    suggest_sparda_category,
+)
 from app.importers.sparda import (
     KNOWN_COLUMNS,
     PrivateProfileRequiredError,
@@ -330,16 +334,15 @@ def test_salary_and_merchant_refund_are_distinct_economic_types(
         ("Bäckerei Morgen", "Brötchen", "Lebensmittel / Bäckerei"),
         ("Metzgerei Muster", "Einkauf", "Lebensmittel / Metzgerei"),
         ("ARAL", "Kraftstoff", "Auto & Mobilität / Tanken"),
-        ("dm Drogerie", "Einkauf", "Drogerie & Pflege"),
-        ("Apotheke am Markt", "Arznei", "Gesundheit / Apotheke"),
+        ("dm Drogerie", "Einkauf", "Drogerie & Körperpflege / Drogerie"),
+        ("Apotheke am Markt", "Arznei", "Gesundheit / Apotheke / Medikamente"),
         ("PARKSTER", "Parkvorgang", "Auto & Mobilität / Parken"),
-        ("BAUHAUS", "Material", "Wohnen & Haushalt / Baumarkt"),
+        ("BAUHAUS", "Material", "Wohnen & Haushalt / Baumarkt / Renovierung"),
         ("Deutsche Glasfaser", "Internet", "Kommunikation / Internet"),
         ("klarmobil", "Mobilfunk", "Kommunikation / Mobilfunk"),
-        ("Beitragsservice", "Rundfunkbeitrag", "Wohnen & Haushalt / Rundfunk"),
         ("Vattenfall", "Strom Abschlag", "Wohnen & Haushalt / Strom"),
-        ("Hauptzollamt", "KFZ-Steuer", "Auto & Mobilität / KFZ-Steuer"),
-        ("donate.jw.org", "Spende", "Spenden & Unterstützung"),
+        ("Hauptzollamt", "KFZ-Steuer", "Auto & Mobilität / Kfz-Steuer"),
+        ("donate.jw.org", "Spende", "Spenden & Unterstützung / Spenden"),
     ],
 )
 def test_category_suggestions_are_separate_from_event_type(
@@ -356,6 +359,49 @@ def test_category_suggestions_are_separate_from_event_type(
     assert decision.event_type == "expense"
     assert decision.category == suggestion
     assert not hasattr(decision, "envelope")
+
+
+def test_generic_dz_bank_alone_never_implies_fuel() -> None:
+    suggestion = suggest_sparda_category("DZ BANK AG", "Kartenzahlung Debit MC", "")
+    decision = classify_sparda_transaction(
+        amount=D("-20"),
+        counterparty="DZ BANK AG",
+        booking_text="Kartenzahlung Debit MC",
+        purpose="",
+    )
+
+    assert suggestion is None
+    assert decision.category is None
+    assert decision.event_type is None
+
+
+def test_specific_card_detail_overrides_generic_counterparty() -> None:
+    merchant = extract_sparda_merchant(
+        counterparty="DZ BANK AG",
+        booking_text="Kartenzahlung Debit MC",
+        purpose="ENO BAGERI APS/Ved Broen 6/Karrebaeksmin/DK/2",
+    )
+
+    assert merchant.raw_counterparty == "DZ BANK AG"
+    assert merchant.canonical_merchant == "ENO BAGERI APS"
+    assert merchant.source == "payment_detail"
+    assert merchant.unambiguous is True
+
+
+@pytest.mark.parametrize(
+    ("detail", "expected"),
+    [
+        ("SPAR KARREB.KSM/Brosvinget 28/Karrebaeksmin/DK/2", "Lebensmittel / Supermarkt"),
+        ("COOP SUPERBR NO/Kaepgaardsvej 6/Noerre Alslev/DK/2", "Lebensmittel / Supermarkt"),
+        ("ENO BAGERI APS/Ved Broen 6/Karrebaeksmin/DK/2", "Lebensmittel / Bäckerei"),
+        ("SCANDLINES PR./Fahrhafenstrasse/Fehmarn/DE/0", "Auto & Mobilität / Fähre"),
+    ],
+)
+def test_generic_processor_uses_specific_detail_for_category(detail: str, expected: str) -> None:
+    suggestion = suggest_sparda_category("DZ BANK AG", "Kartenzahlung Debit MC", detail)
+    assert suggestion is not None
+    assert suggestion.path == expected
+    assert suggestion.confidence >= D("0.95")
 
 
 def test_unknown_debit_creates_review_without_guessed_event(

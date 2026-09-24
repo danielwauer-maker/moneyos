@@ -17,11 +17,14 @@ from app.db.models import (
     Envelope,
     EnvelopeAssignmentDecision,
     EventSourceLink,
+    RawImportRecord,
     ReviewItem,
     SourceTransaction,
     SourceTransactionAccount,
 )
 from app.security.redaction import redact_text
+from app.services.categories import create_category
+from app.services.sparda_reclassification import source_classification
 
 BASELINE_DATE = date(2026, 4, 30)
 CONFIRMED_EVENT_STATUSES = frozenset({"booked", "confirmed"})
@@ -38,6 +41,8 @@ class EnvelopeCandidate:
     category_decision: CategoryAssignmentDecision | None
     booked_at: datetime
     payee: str
+    raw_counterparty: str
+    canonical_merchant: str
     merchant_key: str | None
     amount: Decimal
     account: Account | None
@@ -266,6 +271,15 @@ def _all_candidates(
         else []
     )
     sources_by_id = {source.id: source for source in sources}
+    raw_ids = [source.raw_record_id for source in sources if source.raw_record_id is not None]
+    raw_by_id = (
+        {
+            raw.id: raw
+            for raw in db.scalars(select(RawImportRecord).where(RawImportRecord.id.in_(raw_ids)))
+        }
+        if raw_ids
+        else {}
+    )
     events_by_key = {
         candidate_key(source_id_by_event.get(event.id), event.id): event for event in events
     }
@@ -344,8 +358,19 @@ def _all_candidates(
         raw_payee = source.merchant_raw if source and source.merchant_raw else None
         if not raw_payee and event:
             raw_payee = event.description
-        payee = redact_text(raw_payee or "Unbekannter Zahlungspartner")[:160]
-        merchant_key = payee.casefold() if raw_payee else None
+        raw_counterparty = redact_text(raw_payee or "Unbekannter Zahlungspartner")[:160]
+        source_decision = (
+            source_classification(source, raw_by_id.get(source.raw_record_id))
+            if source is not None and source.source_system == "sparda"
+            else None
+        )
+        canonical_merchant = redact_text(
+            source_decision.merchant.canonical_merchant
+            if source_decision and source_decision.merchant
+            else raw_counterparty
+        )[:160]
+        payee = canonical_merchant
+        merchant_key = canonical_merchant.casefold() if raw_payee else None
         description_raw = source.description_raw if source else (event.description if event else "")
         description_key = redact_text(description_raw).casefold() if description_raw else None
         economic_type = event.event_type if event else (review.proposed_event_type or "unknown")
@@ -356,6 +381,27 @@ def _all_candidates(
         confidence = (
             review.confidence if review and (proposed_envelope or review_category) else None
         )
+        if source_decision and source_decision.category:
+            source_suggestion = source_decision.category
+            matching_category = next(
+                (
+                    item
+                    for item in categories
+                    if item.name == (source_suggestion.child or source_suggestion.parent)
+                    and (
+                        (source_suggestion.child is None and item.parent_id is None)
+                        or (
+                            item.parent is not None and item.parent.name == source_suggestion.parent
+                        )
+                    )
+                ),
+                None,
+            )
+            if proposed_category is None:
+                proposed_category = matching_category
+            if not reason:
+                reason = source_suggestion.reason
+                confidence = source_suggestion.confidence
         if proposed_envelope is None or proposed_category is None:
             (
                 rule_category,
@@ -390,6 +436,8 @@ def _all_candidates(
                 "category_decision": category_decision,
                 "booked_at": source.booked_at if source else event.occurred_at,
                 "payee": payee,
+                "raw_counterparty": raw_counterparty,
+                "canonical_merchant": canonical_merchant,
                 "merchant_key": merchant_key,
                 "amount": event.amount if event else abs(source.amount),
                 "account": account,
@@ -713,20 +761,7 @@ def update_suggestion_rule(
 
 
 def create_subcategory(db: Session, *, parent_id: int, name: str) -> Category:
-    parent = db.get(Category, parent_id)
-    clean_name = " ".join(name.split()).strip()
-    if parent is None or parent.parent_id is not None or not parent.is_active:
-        raise ValueError("Aktive Hauptkategorie erforderlich")
-    if not clean_name:
-        raise ValueError("Name der Unterkategorie fehlt")
-    normalized = clean_name.casefold()
-    existing = list(db.scalars(select(Category)))
-    if any(" ".join(category.name.split()).casefold() == normalized for category in existing):
-        raise ValueError("Eine Kategorie mit diesem Namen existiert bereits")
-    category = Category(name=clean_name, parent_id=parent.id, is_active=True)
-    db.add(category)
-    db.flush()
-    return category
+    return create_category(db, parent_id=parent_id, name=name)
 
 
 def rule_condition_label(rule: AssignmentRule, db: Session) -> str:

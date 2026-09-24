@@ -1,1 +1,30 @@
-{% extends "base.html" %}{% block content %}<div class="notice"><strong>Sauber getrennt:</strong> Kategorie beschreibt wofür, Umschlag woher und Projekt den übergreifenden Zusammenhang.</div><article class="panel category-tree">{% for category in categories %}<details open><summary><span>{{ category.name }}</span><small>{{ category.children|length }} Unterkategorien</small></summary>{% for child in category.children %}<div class="tree-child">{{ child.name }}<span class="badge success">Aktiv</span></div>{% endfor %}</details>{% endfor %}</article>{% endblock %}
+{% extends "base.html" %}{% block content %}
+<div class="intro"><div><h2>Kategorien verwalten</h2><p>Kategorien beschreiben wofür, Umschläge woher und Projekte den übergreifenden Zusammenhang. Umbenennen bewahrt alle bestehenden Beziehungen.</p></div></div>
+{% if error %}<div class="notice"><strong>Änderung nicht gespeichert:</strong> {{ error }}</div>{% endif %}
+
+<article class="panel">
+  <div class="section-head"><div><h2>Neue Hauptkategorie</h2><p>Der Name muss profilweit eindeutig sein; Groß-/Kleinschreibung und mehrfache Leerzeichen werden ignoriert.</p></div></div>
+  <form action="/categories" method="post" class="upload-form"><label>Name <input type="text" name="name" maxlength="100" required></label><button class="primary-button" type="submit">+ Neue Hauptkategorie</button></form>
+</article>
+
+<article class="panel category-tree">
+{% for group in category_groups %}
+  {% set category = group.parent.category %}
+  <details open>
+    <summary><span>{{ category.name }} {% if category.is_active %}<span class="badge success">Aktiv</span>{% else %}<span class="badge neutral">Inaktiv</span>{% endif %}</span><small>{{ group.children|length }} Unterkategorien · {{ group.parent.event_count }} Ereignisse · {{ group.parent.pending_decision_count }} offene Review-Entscheidungen</small></summary>
+    <div class="upload-form">
+      <form action="/categories/{{ category.id }}/rename" method="post" class="upload-form"><label>Hauptkategorie umbenennen <input type="text" name="name" value="{{ category.name }}" maxlength="100" required></label><button class="secondary-button" type="submit">Umbenennen</button></form>
+      <form action="/categories/{{ category.id }}/status" method="post"><input type="hidden" name="active" value="{{ 'false' if category.is_active else 'true' }}"><button class="text-button" type="submit">{{ 'Deaktivieren' if category.is_active else 'Reaktivieren' }}</button></form>
+    </div>
+    {% for child_row in group.children %}{% set child = child_row.category %}
+      <div class="tree-child">
+        <div><strong>{{ child.name }}</strong> {% if child.is_active %}<span class="badge success">Aktiv</span>{% else %}<span class="badge neutral">Inaktiv</span>{% endif %}<br><small>{{ child_row.event_count }} Ereignisse · {{ child_row.pending_decision_count }} offene Review-Entscheidungen</small></div>
+        <form action="/categories/{{ child.id }}/rename" method="post" class="upload-form"><label><span class="visually-hidden">{{ child.name }} umbenennen</span><input type="text" name="name" value="{{ child.name }}" maxlength="100" required></label><button class="text-button" type="submit">Umbenennen</button></form>
+        <form action="/categories/{{ child.id }}/status" method="post"><input type="hidden" name="active" value="{{ 'false' if child.is_active else 'true' }}"><button class="text-button" type="submit">{{ 'Deaktivieren' if child.is_active else 'Reaktivieren' }}</button></form>
+      </div>
+    {% endfor %}
+    {% if category.is_active %}<form action="/categories" method="post" class="upload-form"><input type="hidden" name="parent_id" value="{{ category.id }}"><label>Neue Unterkategorie <input type="text" name="name" maxlength="100" required></label><button class="secondary-button" type="submit">+ Unterkategorie hinzufügen</button></form>{% endif %}
+  </details>
+{% else %}<p>Noch keine Kategorien. Lege oben die erste Hauptkategorie an.</p>{% endfor %}
+</article>
+{% endblock %}

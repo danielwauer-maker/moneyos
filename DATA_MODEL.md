@@ -62,3 +62,12 @@ Alembic versioniert.
 - Kategorie- und Umschlagentscheidung sind orthogonal: Keine von beiden erzwingt
   die jeweils andere. Kategorien verändern weder Konto- noch Umschlagsalden;
   Umschlagzuordnungen wirken nur auf die berechnete Soll-/Abgleichsicht.
+- Kategorie-Stammdaten werden bei einer Umbenennung in derselben Zeile aktualisiert.
+  Deaktivierung bewahrt alle historischen Fremdschlüssel; in Gebrauch befindliche
+  Kategorien werden nicht hart gelöscht. Die bestehende `categories`-Struktur
+  bildet genau Hauptkategorie und Unterkategorie ab, daher benötigt Phase 2B.6
+  keine neue Datenbankmigration.
+- Händlerextraktion ist eine reproduzierbare Sicht auf unveränderliche Sparda-
+  Quellen. Die sichere Reclassification aktualisiert nur `economic_events.category_id`
+  oder `review_items.proposed_category_id`; Raw Records, Source Transactions,
+  Umschlagbeziehungen und Salden bleiben unverändert.

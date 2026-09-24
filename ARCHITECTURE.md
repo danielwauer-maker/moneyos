@@ -79,6 +79,23 @@ Priorisierte `review_suggestion`-Regeln können Kategorie, Umschlag oder beides 
 Vorschlag liefern. Sie werden niemals automatisch ausgeführt. Physische Snapshots,
 Bewegungen und Kontosalden liegen vollständig außerhalb dieses Workflows.
 
+`app/services/categories.py` ist die gemeinsame Schreibgrenze für Kategorie-
+Stammdaten. Namen werden Unicode-normalisiert, von Rand-/Mehrfachleerzeichen
+bereinigt und ohne Beachtung der Groß-/Kleinschreibung auf Duplikate geprüft.
+Umbenennen aktualisiert dieselbe Zeile und bewahrt Fremdschlüssel. Die Hierarchie
+ist auf Haupt- und Unterkategorie begrenzt; es gibt keinen Reparent- oder
+Hard-Delete-Endpunkt. Deaktivierung blendet Kategorien nur für neue Zuordnungen
+aus und verändert weder Ereignisse noch Entscheidungen oder Finanzwerte.
+
+`app/domain/sparda.py` trennt Händlerextraktion von Kategorieklassifikation. Bei
+strukturierten Kartenumsätzen wird der erste Händlerabschnitt des Zahlungsdetails
+verwendet; der generische Gegenpart bleibt für Erklärbarkeit erhalten. Regeln
+arbeiten auf dem extrahierten Händler und konkreten Detailmerkmalen, nicht auf
+`DZ BANK AG` als solchem. `app/services/sparda_reclassification.py` plant die
+Neubewertung read-only und wendet sie anschließend atomar an. Bestätigte
+`category_assignment_decisions` sperren jede automatische Überschreibung.
+Review-only-Quellen erzeugen ausschließlich `ReviewItem`-Vorschläge.
+
 `app/services/import_staging.py` übernimmt Streaming, SHA-256, unveränderte lokale
 Ablage, Dateityp-/Inhaltsprüfung und Quarantäne. Erst ein Batch im Zustand `valid`
 darf an `app/services/import_execution.py` übergeben werden. Der spätere Parser-

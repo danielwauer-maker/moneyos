@@ -29,6 +29,11 @@ ausschließlich in der lokalen Profildatenbank gespeichert. Regeln erzeugen nur
 Vorschläge und führen keine stillen Zuordnungen aus. Tabellen und Logs zeigen keine IBANs,
 Kartenkennungen oder Rohimporte; sichtbare Zahlungspartner werden vor der Ausgabe
 mit der zentralen Redaction-Hilfe behandelt.
+Kategoriepflege ändert ausschließlich Stammdaten. Sie schreibt weder Raw Records
+noch Source Transactions, Salden, Umschlag-Snapshots oder physische Bewegungen.
+Der Sparda-Reclassification-Apply ist privatprofilgebunden, bestätigungspflichtig,
+atomar und erzeugt vorher ein Safety-Backup. Sein Bericht enthält nur aggregierte
+Zähler und redigierte kanonische Händlernamen, keine Zahlungsidentifikatoren.
 
 ## Aktuelle Verschlüsselungsgrenze
 

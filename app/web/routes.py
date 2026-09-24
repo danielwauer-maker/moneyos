@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 from app.config import get_settings
 from app.db.models import (
     Account,
-    Category,
     EconomicEvent,
     ImportBatch,
     Project,
@@ -30,12 +29,17 @@ from app.services.balance_confirmations import (
     parse_money,
     vault_free_cash,
 )
+from app.services.categories import (
+    category_groups,
+    create_category,
+    rename_category,
+    set_category_active,
+)
 from app.services.dashboard import build_dashboard
 from app.services.diagnostics import run_diagnostics
 from app.services.envelope_assignments import (
     apply_assignment_decisions,
     build_assignment_workspace,
-    create_subcategory,
     rule_condition_label,
     update_suggestion_rule,
 )
@@ -142,8 +146,12 @@ def envelope_assignments(request: Request, db: DbSession) -> HTMLResponse:
     )
 
 
-def _assignment_redirect(return_to: str | None, error: str | None = None) -> str:
-    from urllib.parse import quote
+def _assignment_redirect(
+    return_to: str | None,
+    error: str | None = None,
+    selected_category_id: int | None = None,
+) -> str:
+    from urllib.parse import parse_qsl, quote, urlencode
 
     target = (
         return_to
@@ -157,6 +165,15 @@ def _assignment_redirect(return_to: str | None, error: str | None = None) -> str
             target, fragment = target.split("#", 1)
             fragment = f"#{fragment}"
         target = f"{target}{separator}error={quote(error)}{fragment}"
+    elif selected_category_id is not None:
+        fragment = ""
+        if "#" in target:
+            target, fragment = target.split("#", 1)
+            fragment = f"#{fragment}"
+        path, separator, query = target.partition("?")
+        params = dict(parse_qsl(query, keep_blank_values=True)) if separator else {}
+        params["new_category"] = str(selected_category_id)
+        target = f"{path}?{urlencode(params)}{fragment}"
     return target
 
 
@@ -243,19 +260,19 @@ def edit_envelope_rule(
 @router.post("/envelope-assignments/categories")
 def add_review_subcategory(
     db: DbSession,
-    parent_id: Annotated[int, Form()],
     name: Annotated[str, Form()],
+    parent_id: Annotated[int | None, Form()] = None,
     return_to: Annotated[str | None, Form()] = None,
 ) -> RedirectResponse:
-    if get_settings().demo_mode:
-        raise HTTPException(status_code=409, detail="Kategoriepflege ist privatprofilgebunden")
     try:
-        create_subcategory(db, parent_id=parent_id, name=name)
+        category = create_category(db, parent_id=parent_id, name=name)
         db.commit()
     except ValueError as exc:
         db.rollback()
         return RedirectResponse(_assignment_redirect(return_to, str(exc)), status_code=303)
-    return RedirectResponse(_assignment_redirect(return_to), status_code=303)
+    return RedirectResponse(
+        _assignment_redirect(return_to, selected_category_id=category.id), status_code=303
+    )
 
 
 @router.get("/accounts", response_class=HTMLResponse)
@@ -373,14 +390,65 @@ def projects(request: Request, db: DbSession) -> HTMLResponse:
 
 @router.get("/categories", response_class=HTMLResponse)
 def categories(request: Request, db: DbSession) -> HTMLResponse:
-    rows = list(
-        db.scalars(
-            select(Category).where(Category.parent_id.is_(None)).order_by(Category.sort_order)
-        )
-    )
     return render(
-        request, "categories.html", active="categories", page_title="Kategorien", categories=rows
+        request,
+        "categories.html",
+        active="categories",
+        page_title="Kategorien",
+        category_groups=category_groups(db),
+        error=request.query_params.get("error"),
     )
+
+
+def _category_redirect(error: str | None = None) -> str:
+    from urllib.parse import quote
+
+    return f"/categories?error={quote(error)}" if error else "/categories"
+
+
+@router.post("/categories")
+def add_category(
+    db: DbSession,
+    name: Annotated[str, Form()],
+    parent_id: Annotated[int | None, Form()] = None,
+) -> RedirectResponse:
+    try:
+        create_category(db, name=name, parent_id=parent_id)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(_category_redirect(str(exc)), status_code=303)
+    return RedirectResponse(_category_redirect(), status_code=303)
+
+
+@router.post("/categories/{category_id}/rename")
+def rename_category_route(
+    category_id: int,
+    db: DbSession,
+    name: Annotated[str, Form()],
+) -> RedirectResponse:
+    try:
+        rename_category(db, category_id=category_id, name=name)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(_category_redirect(str(exc)), status_code=303)
+    return RedirectResponse(_category_redirect(), status_code=303)
+
+
+@router.post("/categories/{category_id}/status")
+def category_status_route(
+    category_id: int,
+    db: DbSession,
+    active: Annotated[bool, Form()],
+) -> RedirectResponse:
+    try:
+        set_category_active(db, category_id=category_id, active=active)
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        return RedirectResponse(_category_redirect(str(exc)), status_code=303)
+    return RedirectResponse(_category_redirect(), status_code=303)
 
 
 @router.get("/review", response_class=HTMLResponse)

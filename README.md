@@ -168,3 +168,27 @@ schnellen Abgleich. Aus konsistenten Mehrfachauswahlen können priorisierte Rege
 entstehen; diese können Kategorie und Umschlag gemeinsam vorschlagen, ordnen aber
 niemals still zu. Review-only-Quellen behalten eine Kategorieentscheidung für eine
 spätere Ereigniserzeugung, ohne dadurch vorzeitig ein Economic Event anzulegen.
+
+Die Seite **Kategorien** verwaltet Haupt- und Unterkategorien im aktiven Profil.
+Sie unterstützt Anlegen, Umbenennen, Deaktivieren und Reaktivieren und zeigt je
+Kategorie die Zahl zugeordneter Economic Events sowie noch nicht materialisierter
+Review-Entscheidungen. Kategorien werden nicht hart gelöscht. Inaktive Kategorien
+bleiben an historischen Vorgängen sichtbar, erscheinen aber nicht in normalen
+Neuzuordnungslisten. Im Arbeitsbereich **Umschlag-Zuordnung** legt
+`+ Neue Kategorie` Haupt- oder Unterkategorien an und kehrt mit erhaltenen Filtern
+zur Auswahl zurück.
+
+Sparda-Händler werden bei strukturierten Kartenumsätzen aus dem Zahlungsdetail
+extrahiert. Dadurch bleibt der rohe Gegenpart sichtbar, während beispielsweise
+`DZ BANK AG → tatsächlicher Händler` nachvollziehbar kategorisiert wird. Eine sichere
+Neubewertung vorhandener privater Sparda-Daten läuft zweistufig:
+
+```powershell
+$env:MONEYOS_DEMO_MODE = "false"
+.\.venv\Scripts\python.exe -m app.ops reclassify-sparda
+.\.venv\Scripts\python.exe -m app.ops reclassify-sparda --apply --confirm
+```
+
+Der erste Befehl ist read-only. Der Apply-Befehl erzeugt zuerst ein Safety-Backup,
+schützt manuelle Kategorieentscheidungen und schreibt ausschließlich Kategorien
+an Economic Events beziehungsweise Vorschläge an offene Reviews.

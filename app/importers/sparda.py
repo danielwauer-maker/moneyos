@@ -303,7 +303,12 @@ def _safe_description(row: SpardaRow, decision: SpardaDecision) -> str:
     }
     if decision.semantic in fixed:
         return fixed[decision.semantic]
-    candidate = redact_text(row.counterparty or row.booking_text or "Sparda-Buchung")
+    candidate = redact_text(
+        (decision.merchant.canonical_merchant if decision.merchant else "")
+        or row.counterparty
+        or row.booking_text
+        or "Sparda-Buchung"
+    )
     return candidate[:160]
 
 
@@ -382,6 +387,10 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
             metadata_json={
                 "sparda_semantic": decision.semantic,
                 "category_suggestion": decision.category.path if decision.category else None,
+                "canonical_merchant": (
+                    decision.merchant.canonical_merchant if decision.merchant else None
+                ),
+                "merchant_source": decision.merchant.source if decision.merchant else None,
                 "target_account_type": decision.target_account_type,
             },
             fingerprint=row.fingerprint,

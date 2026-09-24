@@ -35,7 +35,7 @@ from app.importers.amex import (
     preview_amex_file,
 )
 from app.main import app
-from app.services.import_staging import stage_upload
+from app.services.import_staging import is_batch_previewable, stage_upload
 from app.services.transaction_review import build_transaction_review
 
 D = Decimal
@@ -592,6 +592,76 @@ def test_stage_preview_execute_flow_and_redacted_preview(
             assert executed.status_code == 303
             repeated = client.post(f"/import/{batch_id}/execute", follow_redirects=False)
             assert repeated.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("source_type", ["sparda", "paypal", "amex"])
+def test_valid_productive_batch_is_previewable_for_every_source(source_type: str) -> None:
+    batch = ImportBatch(
+        source_type=source_type,
+        filename="synthetic.csv",
+        source_hash=f"synthetic-{source_type}",
+        status="valid",
+    )
+
+    assert is_batch_previewable(batch) is True
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("valid", True),
+        ("failed", True),
+        ("uploaded", False),
+        ("validating", False),
+        ("quarantined", False),
+        ("imported", False),
+    ],
+)
+def test_previewable_statuses_remain_intentional(status: str, expected: bool) -> None:
+    batch = ImportBatch(
+        source_type="amex",
+        filename="synthetic.csv",
+        source_hash=f"synthetic-{status}",
+        status=status,
+    )
+
+    assert is_batch_previewable(batch) is expected
+
+
+def test_import_page_and_backend_share_preview_lifecycle_gate(
+    amex_store: tuple[Settings, sessionmaker[Session]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings, factory = amex_store
+    batch = _stage(settings, factory, [_row()])
+
+    def override_db() -> Generator[Session, None, None]:
+        with factory() as db:
+            yield db
+
+    monkeypatch.setattr("app.web.routes.get_settings", lambda: settings)
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            for status, expected_status in (
+                ("valid", 200),
+                ("failed", 200),
+                ("uploaded", 404),
+                ("validating", 404),
+                ("quarantined", 404),
+                ("imported", 404),
+            ):
+                with factory.begin() as db:
+                    current = db.get(ImportBatch, batch.id)
+                    assert current is not None
+                    current.status = status
+
+                page = client.get("/import")
+                preview_href = f'href="/import/{batch.id}/preview"'
+                assert (preview_href in page.text) is (expected_status == 200)
+                preview = client.get(f"/import/{batch.id}/preview")
+                assert preview.status_code == expected_status
     finally:
         app.dependency_overrides.clear()
 

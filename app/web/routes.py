@@ -58,7 +58,11 @@ from app.services.envelope_assignments import (
     rule_condition_label,
     update_suggestion_rule,
 )
-from app.services.import_staging import batch_file_path, stage_upload
+from app.services.import_staging import (
+    batch_file_path,
+    is_batch_previewable,
+    stage_upload,
+)
 from app.services.reviews import build_review_view
 from app.services.transaction_details import event_transaction_views
 from app.services.transaction_review import (
@@ -787,6 +791,7 @@ def imports(
         active="import",
         page_title="Import",
         batches=batches,
+        previewable_batch_ids={batch.id for batch in batches if is_batch_previewable(batch)},
         duplicate=duplicate,
         selected_batch=selected_batch,
     )
@@ -805,10 +810,7 @@ def upload_import(
         stream=upload.file,
         settings=get_settings(),
     )
-    if result.batch.source_type in {"sparda", "paypal", "amex"} and result.batch.status in {
-        "valid",
-        "failed",
-    }:
+    if is_batch_previewable(result.batch):
         if not result.duplicate:
             return RedirectResponse(f"/import/{result.batch.id}/preview", status_code=303)
         return RedirectResponse(
@@ -823,11 +825,7 @@ def upload_import(
 @router.get("/import/{batch_id}/preview", response_class=HTMLResponse)
 def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLResponse:
     batch = db.get(ImportBatch, batch_id)
-    if (
-        batch is None
-        or batch.source_type not in {"sparda", "paypal", "amex"}
-        or batch.status not in {"valid", "failed"}
-    ):
+    if not is_batch_previewable(batch):
         raise HTTPException(status_code=404, detail="Import batch is not previewable")
     path = batch_file_path(batch, get_settings())
     if batch.source_type == "amex":

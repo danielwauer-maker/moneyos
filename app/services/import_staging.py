@@ -23,6 +23,8 @@ ALLOWED_EXTENSIONS: dict[str, frozenset[str]] = {
     "amex": frozenset({".csv"}),
     "amazon": frozenset({".csv", ".json", ".zip"}),
 }
+PRODUCTIVE_IMPORT_SOURCES = frozenset({"sparda", "paypal", "amex"})
+PREVIEWABLE_IMPORT_STATUSES = frozenset({"valid", "failed"})
 SUSPICIOUS_ZIP_SUFFIXES = frozenset(
     {".exe", ".js", ".vbs", ".ps1", ".bat", ".cmd", ".scr", ".dll", ".msi", ".docm", ".xlsm"}
 )
@@ -38,6 +40,15 @@ class ValidationIssue:
 class StageResult:
     batch: ImportBatch
     duplicate: bool = False
+
+
+def is_batch_previewable(batch: ImportBatch | None) -> bool:
+    """Return whether a productive batch may be parsed for a read-only preview."""
+    return bool(
+        batch is not None
+        and batch.source_type in PRODUCTIVE_IMPORT_SOURCES
+        and batch.status in PREVIEWABLE_IMPORT_STATUSES
+    )
 
 
 def _validation_payload(issues: list[ValidationIssue]) -> dict[str, object]:

@@ -23,7 +23,7 @@ from app.db.models import (
     SourceTransactionAccount,
 )
 from app.security.redaction import redact_text
-from app.services.categories import create_category
+from app.services.categories import CategorySelectorGroup, category_selector_groups, create_category
 from app.services.sparda_reclassification import source_classification
 
 BASELINE_DATE = date(2026, 4, 30)
@@ -42,6 +42,7 @@ class EnvelopeCandidate:
     booked_at: datetime
     payee: str
     raw_counterparty: str
+    secondary_detail: str
     canonical_merchant: str
     merchant_key: str | None
     amount: Decimal
@@ -112,6 +113,7 @@ class AssignmentWorkspace:
     amount_groups: tuple[GroupOpportunity, ...]
     accounts: tuple[Account, ...]
     categories: tuple[Category, ...]
+    category_selector_groups: tuple[CategorySelectorGroup, ...]
 
 
 def candidate_key(source_id: int | None, event_id: int | None) -> str:
@@ -369,8 +371,22 @@ def _all_candidates(
             if source_decision and source_decision.merchant
             else raw_counterparty
         )[:160]
+        secondary_detail = redact_text(
+            source_decision.merchant.secondary_detail
+            if source_decision and source_decision.merchant
+            else ""
+        )[:240]
         payee = canonical_merchant
-        merchant_key = canonical_merchant.casefold() if raw_payee else None
+        merchant_key = (
+            canonical_merchant.casefold()
+            if raw_payee
+            and (
+                source_decision is None
+                or source_decision.merchant is None
+                or source_decision.merchant.confidence >= Decimal("0.70")
+            )
+            else None
+        )
         description_raw = source.description_raw if source else (event.description if event else "")
         description_key = redact_text(description_raw).casefold() if description_raw else None
         economic_type = event.event_type if event else (review.proposed_event_type or "unknown")
@@ -437,6 +453,7 @@ def _all_candidates(
                 "booked_at": source.booked_at if source else event.occurred_at,
                 "payee": payee,
                 "raw_counterparty": raw_counterparty,
+                "secondary_detail": secondary_detail,
                 "canonical_merchant": canonical_merchant,
                 "merchant_key": merchant_key,
                 "amount": event.amount if event else abs(source.amount),
@@ -537,6 +554,10 @@ def build_assignment_workspace(
     elif group_by == "amount":
         rows.sort(key=lambda row: (-row.amount, row.booked_at))
 
+    selector_groups = category_selector_groups(db)
+    selector_categories = tuple(
+        category for group in selector_groups for category in (group.parent, *group.children)
+    )
     return AssignmentWorkspace(
         candidates=tuple(rows),
         progress=progress,
@@ -554,14 +575,8 @@ def build_assignment_workspace(
                 key=lambda account: account.name,
             )
         ),
-        categories=tuple(
-            db.scalars(
-                select(Category)
-                .where(Category.is_active)
-                .options(selectinload(Category.parent))
-                .order_by(Category.sort_order, Category.name)
-            )
-        ),
+        categories=selector_categories,
+        category_selector_groups=selector_groups,
     )
 
 

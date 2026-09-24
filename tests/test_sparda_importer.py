@@ -383,9 +383,35 @@ def test_specific_card_detail_overrides_generic_counterparty() -> None:
     )
 
     assert merchant.raw_counterparty == "DZ BANK AG"
+    assert merchant.secondary_detail == "ENO BAGERI APS/Ved Broen 6/Karrebaeksmin/DK/2"
     assert merchant.canonical_merchant == "ENO BAGERI APS"
     assert merchant.source == "payment_detail"
     assert merchant.unambiguous is True
+
+
+def test_ordinary_sparda_merchant_keeps_counterparty_and_exposes_detail() -> None:
+    merchant = extract_sparda_merchant(
+        counterparty="toom BM Beispielstadt",
+        booking_text="Lastschrift",
+        purpose="TOOM BM SAGT DANKE 13563655",
+    )
+
+    assert merchant.raw_counterparty == "toom BM Beispielstadt"
+    assert merchant.secondary_detail == "TOOM BM SAGT DANKE 13563655"
+    assert merchant.canonical_merchant == "toom BM Beispielstadt"
+    assert merchant.source == "counterparty"
+
+
+def test_missing_secondary_detail_stays_empty() -> None:
+    merchant = extract_sparda_merchant(
+        counterparty="Fiktiver Zahlungspartner",
+        booking_text="Lastschrift",
+        purpose="",
+    )
+
+    assert merchant.raw_counterparty == "Fiktiver Zahlungspartner"
+    assert merchant.secondary_detail == ""
+    assert merchant.canonical_merchant == "Fiktiver Zahlungspartner"
 
 
 @pytest.mark.parametrize(
@@ -402,6 +428,8 @@ def test_generic_processor_uses_specific_detail_for_category(detail: str, expect
     assert suggestion is not None
     assert suggestion.path == expected
     assert suggestion.confidence >= D("0.95")
+    assert suggestion.matched_field == "Buchungsdetail"
+    assert "erkannt aus" in suggestion.reason
 
 
 def test_unknown_debit_creates_review_without_guessed_event(

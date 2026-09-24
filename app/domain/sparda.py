@@ -14,6 +14,8 @@ class CategorySuggestion:
     child: str | None
     confidence: Decimal
     reason: str = "Deterministische Kategorie-Regel"
+    matched_field: str | None = None
+    matched_text: str | None = None
 
     @property
     def path(self) -> str:
@@ -24,11 +26,16 @@ class CategorySuggestion:
 class MerchantExtraction:
     raw_counterparty: str
     canonical_merchant: str
-    detail: str
+    secondary_detail: str
     source: str
     confidence: Decimal
     reason: str
     unambiguous: bool
+
+    @property
+    def detail(self) -> str:
+        """Compatibility alias for the secondary source detail."""
+        return self.secondary_detail
 
 
 @dataclass(frozen=True)
@@ -66,6 +73,11 @@ def _display_text(value: str) -> str:
 GENERIC_COUNTERPARTIES = (
     "DZ BANK AG",
     "DZ BANK",
+    "B+S CARD SERVICE",
+    "PAYONE",
+    "WORLDLINE",
+    "NEXI",
+    "SUMUP",
 )
 
 
@@ -90,11 +102,37 @@ def _structured_card_merchant(purpose: str) -> str | None:
     return first_segment[:160]
 
 
+def _useful_secondary_detail(
+    *, counterparty: str, booking_text: str, purpose: str, note: str
+) -> str:
+    raw = _searchable(counterparty)
+    for value in (purpose, note, booking_text):
+        candidate = _display_text(value)
+        normalized = _searchable(candidate)
+        if not candidate or normalized == raw:
+            continue
+        if normalized in {
+            "KARTENZAHLUNG",
+            "KARTENZAHLUNG DEBIT MC",
+            "LASTSCHRIFT",
+            "UBERWEISUNG",
+            "GUTSCHRIFT",
+        }:
+            continue
+        return candidate[:240]
+    return ""
+
+
 def extract_sparda_merchant(
     *, counterparty: str, booking_text: str, purpose: str, note: str = ""
 ) -> MerchantExtraction:
     raw_counterparty = _display_text(counterparty)
-    detail = _display_text(purpose or note)
+    detail = _useful_secondary_detail(
+        counterparty=counterparty,
+        booking_text=booking_text,
+        purpose=purpose,
+        note=note,
+    )
     booking = _searchable(booking_text)
     structured_detail = (
         _structured_card_merchant(purpose)
@@ -105,7 +143,7 @@ def extract_sparda_merchant(
         return MerchantExtraction(
             raw_counterparty=raw_counterparty,
             canonical_merchant=structured_detail,
-            detail=detail,
+            secondary_detail=detail,
             source="payment_detail",
             confidence=Decimal("0.99"),
             reason="Strukturierter Kartenumsatz: Händler vor dem ersten Detailtrenner",
@@ -115,7 +153,7 @@ def extract_sparda_merchant(
         return MerchantExtraction(
             raw_counterparty=raw_counterparty,
             canonical_merchant=raw_counterparty[:160],
-            detail=detail,
+            secondary_detail=detail,
             source="counterparty",
             confidence=Decimal("0.98"),
             reason="Spezifischer Zahlungspartner",
@@ -126,7 +164,7 @@ def extract_sparda_merchant(
         return MerchantExtraction(
             raw_counterparty=raw_counterparty,
             canonical_merchant=candidate,
-            detail=detail,
+            secondary_detail=detail,
             source="purpose",
             confidence=Decimal("0.70"),
             reason="Generischer Zahlungspartner; Verwendungszweck als vorsichtiger Fallback",
@@ -136,7 +174,7 @@ def extract_sparda_merchant(
     return MerchantExtraction(
         raw_counterparty=raw_counterparty,
         canonical_merchant=fallback[:160],
-        detail="",
+        secondary_detail=detail,
         source="generic_counterparty",
         confidence=Decimal("0.30"),
         reason="Nur generischer Zahlungspartner verfügbar",
@@ -284,23 +322,129 @@ def suggest_sparda_category(
         purpose=purpose,
         note=note,
     )
-    text = _searchable(merchant.canonical_merchant, merchant.detail)
-    for rule in CATEGORY_RULES:
-        if any(re.search(pattern, text) for pattern in rule.patterns):
-            confidence = min(rule.confidence, merchant.confidence)
-            return CategorySuggestion(rule.parent, rule.child, confidence, rule.reason)
+    fields: list[tuple[str, str, str, Decimal]] = []
+    canonical_label = (
+        "Buchungsdetail" if merchant.source in {"payment_detail", "purpose"} else "Händler"
+    )
+    fields.append(
+        (
+            canonical_label,
+            merchant.canonical_merchant,
+            _searchable(merchant.canonical_merchant),
+            merchant.confidence,
+        )
+    )
+    if merchant.secondary_detail:
+        fields.append(
+            (
+                "Buchungsdetail",
+                merchant.secondary_detail,
+                _searchable(merchant.secondary_detail),
+                Decimal("0.98"),
+            )
+        )
+    fields.append(
+        (
+            "Gegenpartei",
+            merchant.raw_counterparty,
+            _searchable(merchant.raw_counterparty),
+            (
+                Decimal("0.95")
+                if not _is_generic_counterparty(merchant.raw_counterparty)
+                else Decimal("0.50")
+            ),
+        )
+    )
+    seen: set[str] = set()
+    for field_name, display_value, searchable, field_confidence in fields:
+        if not searchable or searchable in seen:
+            continue
+        seen.add(searchable)
+        for rule in CATEGORY_RULES:
+            if any(re.search(pattern, searchable) for pattern in rule.patterns):
+                confidence = min(rule.confidence, field_confidence)
+                snippet = _display_text(display_value)[:80]
+                reason = f'{rule.reason} – erkannt aus "{snippet}" im {field_name}'
+                return CategorySuggestion(
+                    rule.parent,
+                    rule.child,
+                    confidence,
+                    reason,
+                    matched_field=field_name,
+                    matched_text=snippet,
+                )
     return None
 
 
-def _income_category(text: str) -> CategorySuggestion | None:
-    if any(pattern in text for pattern in ("FAMILIENKASSE", "KINDERGELD")):
-        return CategorySuggestion("Einnahmen", "Kindergeld", Decimal("0.99"), "Kindergeld-Muster")
-    if any(
-        pattern in text
-        for pattern in ("GEHALT", "LOHN", "BUNDESAGENTUR FUR ARBEIT", "ARBEITSLOSENGELD")
-    ):
-        return CategorySuggestion(
-            "Einnahmen", "Gehalt / ALG", Decimal("0.99"), "Gehalt-/ALG-Muster"
+def _matching_evidence(
+    merchant: MerchantExtraction, patterns: tuple[str, ...]
+) -> tuple[str, str] | None:
+    fields = (
+        (
+            "Buchungsdetail" if merchant.source in {"payment_detail", "purpose"} else "Händler",
+            merchant.canonical_merchant,
+        ),
+        ("Buchungsdetail", merchant.secondary_detail),
+        ("Gegenpartei", merchant.raw_counterparty),
+    )
+    seen: set[str] = set()
+    for field_name, value in fields:
+        searchable = _searchable(value)
+        if not searchable or searchable in seen:
+            continue
+        seen.add(searchable)
+        if any(pattern in searchable for pattern in patterns):
+            return field_name, _display_text(value)[:80]
+    return None
+
+
+def _explained_category(
+    merchant: MerchantExtraction,
+    *,
+    parent: str,
+    child: str,
+    confidence: Decimal,
+    label: str,
+    patterns: tuple[str, ...],
+) -> CategorySuggestion:
+    evidence = _matching_evidence(merchant, patterns)
+    if evidence is None:
+        return CategorySuggestion(parent, child, confidence, label)
+    field_name, snippet = evidence
+    return CategorySuggestion(
+        parent,
+        child,
+        confidence,
+        f'{label} – erkannt aus "{snippet}" im {field_name}',
+        matched_field=field_name,
+        matched_text=snippet,
+    )
+
+
+def _income_category(merchant: MerchantExtraction) -> CategorySuggestion | None:
+    if _matching_evidence(merchant, ("FAMILIENKASSE", "KINDERGELD")):
+        return _explained_category(
+            merchant,
+            parent="Einnahmen",
+            child="Kindergeld",
+            confidence=Decimal("0.99"),
+            label="Kindergeld-Muster",
+            patterns=("FAMILIENKASSE", "KINDERGELD"),
+        )
+    income_patterns = (
+        "GEHALT",
+        "LOHN",
+        "BUNDESAGENTUR FUR ARBEIT",
+        "ARBEITSLOSENGELD",
+    )
+    if _matching_evidence(merchant, income_patterns):
+        return _explained_category(
+            merchant,
+            parent="Einnahmen",
+            child="Gehalt / ALG",
+            confidence=Decimal("0.99"),
+            label="Gehalt-/ALG-Muster",
+            patterns=income_patterns,
         )
     return None
 
@@ -379,15 +523,17 @@ def classify_sparda_transaction(
                 Decimal("0.99"),
                 "tax_refund_income",
                 link_type="canonical_source",
-                category=CategorySuggestion(
-                    "Einnahmen",
-                    "Erstattung / Rückzahlung",
-                    Decimal("0.99"),
-                    "Eindeutige Finanzamt-Erstattung",
+                category=_explained_category(
+                    merchant,
+                    parent="Einnahmen",
+                    child="Erstattung / Rückzahlung",
+                    confidence=Decimal("0.99"),
+                    label="Eindeutige Finanzamt-Erstattung",
+                    patterns=("FINANZAMT",),
                 ),
                 merchant=merchant,
             )
-        income_category = _income_category(text)
+        income_category = _income_category(merchant)
         if income_category is not None:
             return SpardaDecision(
                 classify_account_movement(AccountMovementKind.INCOME),
@@ -413,11 +559,20 @@ def classify_sparda_transaction(
                 Decimal("0.95"),
                 "merchant_refund",
                 link_type="canonical_source",
-                category=CategorySuggestion(
-                    "Einnahmen",
-                    "Erstattung / Rückzahlung",
-                    Decimal("0.95"),
-                    "Eindeutiges Erstattungs-Muster",
+                category=_explained_category(
+                    merchant,
+                    parent="Einnahmen",
+                    child="Erstattung / Rückzahlung",
+                    confidence=Decimal("0.95"),
+                    label="Eindeutiges Erstattungs-Muster",
+                    patterns=(
+                        "ERSTATTUNG",
+                        "RUCKERSTATTUNG",
+                        "RUCKZAHLUNG",
+                        "RETOURE",
+                        "REFUND",
+                        "STORNO",
+                    ),
                 ),
                 merchant=merchant,
             )

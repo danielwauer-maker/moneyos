@@ -89,6 +89,12 @@ class CategoryGroup:
     children: tuple[ManagedCategory, ...]
 
 
+@dataclass(frozen=True)
+class CategorySelectorGroup:
+    parent: Category
+    children: tuple[Category, ...]
+
+
 def clean_category_name(name: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", name).split()).strip()
 
@@ -250,6 +256,31 @@ def category_by_path(db: Session, parent_name: str, child_name: str | None) -> C
     return child
 
 
+def category_selector_groups(
+    db: Session, *, include_inactive: bool = False
+) -> tuple[CategorySelectorGroup, ...]:
+    query = select(Category).options(selectinload(Category.parent))
+    if not include_inactive:
+        query = query.where(Category.is_active)
+    categories = list(db.scalars(query))
+    parents = sorted(
+        (category for category in categories if category.parent_id is None),
+        key=lambda category: normalized_category_name(category.name),
+    )
+    return tuple(
+        CategorySelectorGroup(
+            parent=parent,
+            children=tuple(
+                sorted(
+                    (category for category in categories if category.parent_id == parent.id),
+                    key=lambda category: normalized_category_name(category.name),
+                )
+            ),
+        )
+        for parent in parents
+    )
+
+
 def category_groups(db: Session) -> tuple[CategoryGroup, ...]:
     categories = list(
         db.scalars(
@@ -283,12 +314,19 @@ def category_groups(db: Session) -> tuple[CategoryGroup, ...]:
         )
         for category in categories
     }
-    parents = [category for category in categories if category.parent_id is None]
+    parents = sorted(
+        (category for category in categories if category.parent_id is None),
+        key=lambda category: normalized_category_name(category.name),
+    )
     return tuple(
         CategoryGroup(
             parent=managed[parent.id],
             children=tuple(
-                managed[child.id] for child in categories if child.parent_id == parent.id
+                managed[child.id]
+                for child in sorted(
+                    (item for item in categories if item.parent_id == parent.id),
+                    key=lambda item: normalized_category_name(item.name),
+                )
             ),
         )
         for parent in parents

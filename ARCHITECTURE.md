@@ -96,6 +96,12 @@ Neubewertung read-only und wendet sie anschließend atomar an. Bestätigte
 `category_assignment_decisions` sperren jede automatische Überschreibung.
 Review-only-Quellen erzeugen ausschließlich `ReviewItem`-Vorschläge.
 
+`app/services/transaction_details.py` erzeugt aus unveränderten Sparda-Quellen eine
+reine Anzeigesicht aus ursprünglicher Gegenpartei, informativer zweiter Detailzeile
+und kanonischem Händler. Tabellen zeigen die Gegenpartei zuerst; der kanonische
+Händler dient nur zuverlässiger Gruppierung, Regeln und Kategorie-Vorschlägen. Die
+Ableitung schreibt keine Werte in Raw Records oder Source Transactions.
+
 `app/services/import_staging.py` übernimmt Streaming, SHA-256, unveränderte lokale
 Ablage, Dateityp-/Inhaltsprüfung und Quarantäne. Erst ein Batch im Zustand `valid`
 darf an `app/services/import_execution.py` übergeben werden. Der spätere Parser-

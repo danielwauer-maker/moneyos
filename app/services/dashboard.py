@@ -12,6 +12,7 @@ from app.db.models import (
 from app.domain.accounting import WealthInputs, total_wealth
 from app.services.balance_confirmations import account_balance_views, vault_free_cash
 from app.services.envelope_targets import calculate_envelope_targets
+from app.services.transaction_details import event_transaction_views
 
 
 def build_dashboard(session: Session) -> dict[str, object]:
@@ -104,6 +105,6 @@ def build_dashboard(session: Session) -> dict[str, object]:
         "vault_balance_confirmed": vault_balance_confirmed,
         "reconciliation": envelope_targets.reconciliation,
         "envelope_targets": envelope_targets,
-        "recent_events": recent_events,
+        "recent_transaction_views": event_transaction_views(session, recent_events),
         "recurring": recurring,
     }

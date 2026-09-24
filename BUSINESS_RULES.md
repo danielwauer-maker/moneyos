@@ -52,6 +52,12 @@ vor einem generischen Prozessor. Verwendungszweck folgt danach; der generische
 Zahlungspartner ist nur Fallback. `DZ BANK AG` allein begründet niemals eine
 Tankstellen- oder andere Ausgabenkategorie.
 
+Für jede Sparda-Anzeige bleiben ursprüngliche Gegenpartei, sekundäres Buchungsdetail
+und kanonischer Händler getrennt. Klassifikation prüft zuerst den spezifischen
+kanonischen Händler, danach das sekundäre Detail und erst zuletzt die Gegenpartei.
+Der Vorschlagsgrund nennt das auslösende Feld; unzuverlässige Prozessor-Fallbacks
+werden nicht als gemeinsame Händlergruppe behandelt.
+
 Die optimierte Hierarchie umfasst: Einnahmen; Lebensmittel; Gastronomie; Wohnen &
 Haushalt; Drogerie & Körperpflege; Gesundheit; Auto & Mobilität; Kommunikation;
 Abos & Digitales; Versicherungen; Kleidung; Freizeit; Geschenke; Spenden &

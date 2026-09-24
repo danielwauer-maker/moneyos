@@ -71,3 +71,6 @@ Alembic versioniert.
   Quellen. Die sichere Reclassification aktualisiert nur `economic_events.category_id`
   oder `review_items.proposed_category_id`; Raw Records, Source Transactions,
   Umschlagbeziehungen und Salden bleiben unverändert.
+- `raw_counterparty`, `secondary_detail` und `canonical_merchant` der UI sind
+  abgeleitete, nicht persistierte Ansichten. Eine neue Detailanzeige oder
+  Gruppierungslogik erfordert deshalb keine Migration und keine Quellmutation.

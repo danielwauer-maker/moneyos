@@ -24,6 +24,7 @@ from app.db.session import get_db
 from app.main import app
 from app.services.categories import (
     category_groups,
+    category_selector_groups,
     create_category,
     hard_delete_category,
     rename_category,
@@ -221,7 +222,7 @@ def test_quick_create_appears_immediately_in_assignment_workflow(db: Session) ->
     assert page.status_code == 200
     assert "Schnell erstellt" in page.text
     assert "selected>\nSchnell erstellt" not in page.text  # compact template has inline options
-    assert "selected>Schnell erstellt</option>" in page.text
+    assert "selected>● Schnell erstellt (Hauptkategorie)</option>" in page.text
 
 
 def test_category_management_does_not_change_financial_balances(db: Session) -> None:
@@ -245,3 +246,40 @@ def test_category_management_does_not_change_financial_balances(db: Session) -> 
 
     assert account.balance == D("42.50")
     assert snapshot.physical_balance == D("25")
+
+
+def test_category_selector_groups_are_alphabetical(db: Session) -> None:
+    zulu = create_category(db, name="Zulu")
+    alpha = create_category(db, name="Alpha")
+    create_category(db, name="Zweite", parent_id=alpha.id)
+    create_category(db, name="Erste", parent_id=alpha.id)
+    create_category(db, name="Kind", parent_id=zulu.id)
+
+    groups = category_selector_groups(db)
+
+    assert [group.parent.name for group in groups] == ["Alpha", "Zulu"]
+    assert [child.name for child in groups[0].children] == ["Erste", "Zweite"]
+
+
+def test_assignment_category_picker_is_hierarchical_and_searchable(db: Session) -> None:
+    parent = create_category(db, name="Auto & Mobilität")
+    child = create_category(db, name="Fähre", parent_id=parent.id)
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            page = client.get("/envelope-assignments?state=all")
+            script = client.get("/static/app.js")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert page.status_code == 200
+    assert '<optgroup label="Auto &amp; Mobilität">' in page.text
+    assert f'value="{parent.id}"' in page.text
+    assert f'value="{child.id}"' in page.text
+    assert "data-category-search=" in page.text
+    assert "data-category-text=" in page.text
+    assert "toLocaleLowerCase" in script.text

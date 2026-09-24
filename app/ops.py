@@ -14,6 +14,7 @@ from app.services.private_profile import initialize_private_profile
 from app.services.retention import apply_retention, plan_retention
 from app.services.sparda_reclassification import (
     apply_sparda_reclassification,
+    audit_sparda_transaction_details,
     plan_sparda_reclassification,
 )
 
@@ -47,6 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reclassify.add_argument("--apply", action="store_true")
     reclassify.add_argument("--confirm", action="store_true")
+    commands.add_parser(
+        "audit-sparda-details",
+        help="Read-only audit of Sparda secondary details and category suggestions",
+    )
     return parser
 
 
@@ -126,6 +131,12 @@ def main() -> None:
                 report = apply_sparda_reclassification(db)
             print(f"safety_backup={backup}")
             print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
+    elif args.command == "audit-sparda-details":
+        if settings.demo_mode:
+            raise ValueError("audit-sparda-details requires MONEYOS_DEMO_MODE=false")
+        with SessionLocal() as db:
+            report = audit_sparda_transaction_details(db)
+        print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
 
 
 if __name__ == "__main__":

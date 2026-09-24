@@ -81,6 +81,26 @@ class ReclassificationReport:
         }
 
 
+@dataclass(frozen=True)
+class SpardaDetailAudit:
+    total_source_transactions: int
+    usable_secondary_detail: int
+    canonical_merchant_differs: int
+    category_suggestions_would_change: int
+    ambiguous_without_category_suggestion: int
+    protected_manual_decisions: int
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "total_source_transactions": self.total_source_transactions,
+            "usable_secondary_detail": self.usable_secondary_detail,
+            "canonical_merchant_differs": self.canonical_merchant_differs,
+            "category_suggestions_would_change": self.category_suggestions_would_change,
+            "ambiguous_without_category_suggestion": self.ambiguous_without_category_suggestion,
+            "protected_manual_decisions": self.protected_manual_decisions,
+        }
+
+
 def _category_path(category: Category | None) -> str:
     if category is None:
         return "Offen"
@@ -263,6 +283,32 @@ def _report(
 
 def plan_sparda_reclassification(db: Session) -> ReclassificationReport:
     return _report(_load_candidates(db))
+
+
+def audit_sparda_transaction_details(db: Session) -> SpardaDetailAudit:
+    candidates = _load_candidates(db)
+    changes = 0
+    for candidate in candidates:
+        if candidate.suggestion is None or candidate.protected or candidate.action == "unresolved":
+            continue
+        current_category = (
+            candidate.event.category
+            if candidate.event is not None
+            else (candidate.review.proposed_category if candidate.review is not None else None)
+        )
+        if _category_path(current_category) != candidate.suggestion.path:
+            changes += 1
+    return SpardaDetailAudit(
+        total_source_transactions=len(candidates),
+        usable_secondary_detail=sum(bool(item.merchant.secondary_detail) for item in candidates),
+        canonical_merchant_differs=sum(
+            item.merchant.canonical_merchant.casefold() != item.merchant.raw_counterparty.casefold()
+            for item in candidates
+        ),
+        category_suggestions_would_change=changes,
+        ambiguous_without_category_suggestion=sum(item.suggestion is None for item in candidates),
+        protected_manual_decisions=sum(item.protected for item in candidates),
+    )
 
 
 def apply_sparda_reclassification(db: Session) -> ReclassificationReport:

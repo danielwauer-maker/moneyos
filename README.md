@@ -192,3 +192,17 @@ $env:MONEYOS_DEMO_MODE = "false"
 Der erste Befehl ist read-only. Der Apply-Befehl erzeugt zuerst ein Safety-Backup,
 schützt manuelle Kategorieentscheidungen und schreibt ausschließlich Kategorien
 an Economic Events beziehungsweise Vorschläge an offene Reviews.
+
+Transaktionslisten zeigen bei Sparda-Vorgängen die ursprüngliche Bank-Gegenpartei
+in der ersten Zeile und ein abgeleitetes Buchungsdetail darunter. Der kanonische
+Händler bleibt als dezenter Hinweis sowie für sichere Gruppierung und Vorschläge
+verfügbar. Kategorieauswahl und -filter sind alphabetisch nach Hauptkategorie
+gruppiert, Unterkategorien stehen direkt darunter und können ohne Frontend-Framework
+durchsucht werden.
+
+Der ausschließlich lesende Detail-Audit für das Privatprofil lautet:
+
+```powershell
+$env:MONEYOS_DEMO_MODE = "false"
+.\.venv\Scripts\python.exe -m app.ops audit-sparda-details
+```

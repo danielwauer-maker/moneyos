@@ -12,6 +12,7 @@ from app.db.models import (
     EconomicEvent,
     ImportBatch,
     Project,
+    RawImportRecord,
     ReviewItem,
     SourceTransaction,
     SourceTransactionAccount,
@@ -45,6 +46,7 @@ from app.services.envelope_assignments import (
 )
 from app.services.import_staging import batch_file_path, stage_upload
 from app.services.reviews import build_review_view
+from app.services.transaction_details import event_transaction_views
 from app.web.templating import templates
 
 router = APIRouter()
@@ -93,7 +95,7 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
         "transactions.html",
         active="transactions",
         page_title="Transaktionen",
-        events=events,
+        transaction_views=event_transaction_views(db, events),
     )
 
 
@@ -467,12 +469,29 @@ def review(request: Request, db: DbSession) -> HTMLResponse:
             .order_by(ReviewItem.status, ReviewItem.id)
         )
     )
+    raw_ids = {
+        row.source_transaction.raw_record_id
+        for row in rows
+        if row.source_transaction and row.source_transaction.raw_record_id is not None
+    }
+    raw_by_id = {
+        raw.id: raw
+        for raw in db.scalars(select(RawImportRecord).where(RawImportRecord.id.in_(raw_ids)))
+    }
     return render(
         request,
         "review.html",
         active="review",
         page_title="Prüfen",
-        reviews=[build_review_view(row) for row in rows],
+        reviews=[
+            build_review_view(
+                row,
+                raw_by_id.get(row.source_transaction.raw_record_id)
+                if row.source_transaction
+                else None,
+            )
+            for row in rows
+        ],
     )
 
 

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from app.db.models import ReviewItem
-from app.security.redaction import redact_text
+from app.db.models import RawImportRecord, ReviewItem
+from app.services.transaction_details import derive_transaction_detail
 
 TYPE_LABELS = {
     "expense": "Ausgabe",
@@ -20,6 +20,8 @@ class ReviewView:
     review: ReviewItem
     booked_at: datetime | None
     payee: str
+    secondary_detail: str
+    canonical_merchant: str
     amount: Decimal | None
     source_account: str
     proposed_type: str
@@ -27,13 +29,14 @@ class ReviewView:
     proposed_envelope: str
 
 
-def build_review_view(review: ReviewItem) -> ReviewView:
+def build_review_view(review: ReviewItem, raw: RawImportRecord | None = None) -> ReviewView:
     source = review.source_transaction
     event = review.economic_event
-    candidate = source.merchant_raw if source and source.merchant_raw else None
-    if not candidate and event:
-        candidate = event.description
-    payee = redact_text(candidate or "Quelltransaktion")[:160]
+    display = derive_transaction_detail(
+        source,
+        raw,
+        fallback=event.description if event else "Quelltransaktion",
+    )
     source_account = "Nicht zugeordnet"
     if source:
         account_link = next((link for link in source.account_links if link.role == "source"), None)
@@ -54,7 +57,9 @@ def build_review_view(review: ReviewItem) -> ReviewView:
     return ReviewView(
         review=review,
         booked_at=source.booked_at if source else (event.occurred_at if event else None),
-        payee=payee,
+        payee=display.raw_counterparty,
+        secondary_detail=display.secondary_detail,
+        canonical_merchant=display.canonical_merchant,
         amount=source.amount if source else (event.amount if event else None),
         source_account=source_account,
         proposed_type=proposed_label,

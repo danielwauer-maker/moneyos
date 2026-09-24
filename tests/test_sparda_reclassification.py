@@ -22,6 +22,7 @@ from app.services.categories import category_by_path
 from app.services.envelope_assignments import build_assignment_workspace
 from app.services.sparda_reclassification import (
     apply_sparda_reclassification,
+    audit_sparda_transaction_details,
     plan_sparda_reclassification,
 )
 
@@ -113,8 +114,12 @@ def test_manual_category_decision_is_never_overwritten(db: Session) -> None:
     db.flush()
 
     report = apply_sparda_reclassification(db)
+    audit = audit_sparda_transaction_details(db)
 
     assert report.protected_manual_decisions == 1
+    assert audit.protected_manual_decisions == 1
+    assert audit.usable_secondary_detail == 1
+    assert audit.canonical_merchant_differs == 1
     assert event.category_id == manual_category.id
 
 

@@ -1,0 +1,49 @@
+.transaction-detail {
+  display: inline-block;
+  max-width: 360px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.merchant-hint {
+  display: inline-flex;
+  margin-top: 4px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--teal);
+  font-size: 11px;
+}
+
+.category-picker {
+  display: inline-flex;
+  min-width: 210px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.category-picker-search {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.category-picker select {
+  width: 100%;
+}
+
+.category-picker optgroup {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.category-picker option {
+  color: var(--ink);
+  font-weight: 400;
+}

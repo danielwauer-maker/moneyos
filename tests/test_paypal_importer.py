@@ -36,6 +36,7 @@ from app.importers.paypal import (
     preview_paypal_file,
 )
 from app.main import app
+from app.services.import_execution import repair_imported_batch_lifecycle
 from app.services.import_staging import stage_upload
 from app.services.transaction_review import build_transaction_review
 
@@ -499,6 +500,10 @@ def test_failed_batch_can_retry_without_partial_or_duplicate_records(
     with pytest.raises(RuntimeError):
         import_paypal_batch(factory, batch.id, settings)
     with factory() as db:
+        failed_batch = db.get(ImportBatch, batch.id)
+        assert failed_batch.validation_json["result"] == "failed"
+        assert failed_batch.validation_json["issues"][0]["code"] == "import_failed"
+        assert len(failed_batch.metadata_json["attempt_history"]) == 1
         resumed = stage_upload(
             db,
             source_type="paypal",
@@ -513,10 +518,30 @@ def test_failed_batch_can_retry_without_partial_or_duplicate_records(
     import_paypal_batch(factory, batch.id, settings)
 
     with factory() as db:
-        assert db.get(ImportBatch, batch.id).status == "imported"
+        imported_batch = db.get(ImportBatch, batch.id)
+        assert imported_batch.status == "imported"
+        assert imported_batch.validation_json == {"issues": [], "result": "imported"}
+        assert len(imported_batch.metadata_json["attempt_history"]) == 1
+        assert imported_batch.metadata_json["attempt_history"][0]["status"] == "failed"
         assert db.scalar(select(func.count()).select_from(RawImportRecord)) == 1
         assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 1
         assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 1
+
+    def override_db() -> Generator[Session, None, None]:
+        with factory() as db:
+            yield db
+
+    monkeypatch.setattr("app.web.routes.get_settings", lambda: settings)
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            page = client.get(f"/import?batch_id={batch.id}")
+            assert page.status_code == 200
+            assert "Import erfolgreich" in page.text
+            assert "Historische Fehler: 1" in page.text
+            assert "import_failed" not in page.text
+    finally:
+        app.dependency_overrides.clear()
     with pytest.raises(ValueError, match="valid or failed"):
         import_paypal_batch(factory, batch.id, settings)
     with factory() as db:
@@ -550,6 +575,45 @@ def test_repeated_paypal_transaction_code_uses_unique_stable_source_ids(
             )
         )
         assert len(source_ids) == len(set(source_ids)) == 2
+
+
+def test_legacy_stale_failure_is_archived_without_changing_import_counts(
+    paypal_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = paypal_store
+    batch = _import(settings, factory, [_row()])
+    with factory.begin() as db:
+        current = db.get(ImportBatch, batch.id)
+        current.validation_json = {
+            "issues": [
+                {
+                    "code": "import_failed",
+                    "message": "Der Import wurde vollständig zurückgerollt.",
+                }
+            ]
+        }
+        current.metadata_json = {
+            key: value for key, value in current.metadata_json.items() if key != "attempt_history"
+        }
+        before = (
+            db.scalar(select(func.count()).select_from(RawImportRecord)),
+            db.scalar(select(func.count()).select_from(SourceTransaction)),
+            db.scalar(select(func.count()).select_from(EconomicEvent)),
+            db.scalar(select(func.count()).select_from(ReviewItem)),
+        )
+        assert repair_imported_batch_lifecycle(current) is True
+        after = (
+            db.scalar(select(func.count()).select_from(RawImportRecord)),
+            db.scalar(select(func.count()).select_from(SourceTransaction)),
+            db.scalar(select(func.count()).select_from(EconomicEvent)),
+            db.scalar(select(func.count()).select_from(ReviewItem)),
+        )
+        assert current.validation_json == {"issues": [], "result": "imported"}
+        assert current.metadata_json["attempt_history"][0]["status"] == "failed"
+        assert current.metadata_json["attempt_history"][0]["source"] == (
+            "legacy_current_validation"
+        )
+        assert before == after == (1, 1, 1, 0)
 
 
 def test_paypal_stage_preview_execute_and_completed_reexecute_blocked(

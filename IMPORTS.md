@@ -154,6 +154,11 @@ Batch bleibt unter derselben Batch-ID vorschau- und ausführbar. Der Retry prüf
 unveränderten Staging-Hash erneut und läuft wieder vollständig atomar; ein bereits
 abgeschlossener Batch kann dagegen nicht erneut ausgeführt werden.
 
+Fehlgeschlagene Versuche bleiben unter `metadata_json.attempt_history` mit neutralem
+Fehlercode und Zeitpunkt auditierbar. Nach einem erfolgreichen Retry beschreibt
+`validation_json` nur noch das aktuelle Ergebnis `imported`; die Importtabelle zeigt
+historische Fehler getrennt vom aktuellen Status und nicht mehr als aktive Prüfung.
+
 Aufbewahrungsregeln sind in `.env` konfigurierbar. Sie laufen nie stillschweigend:
 `python -m app.ops retention` zeigt Kandidaten, erst `--apply --confirm` löscht.
 Mindestens die konfigurierten neuesten Backups und immer wenigstens ein Backup

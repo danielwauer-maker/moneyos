@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import csv
 import io
+from collections.abc import Generator
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -22,6 +24,7 @@ from app.db.models import (
     SourceTransaction,
     SourceTransactionAccount,
 )
+from app.db.session import get_db
 from app.importers import paypal
 from app.importers.paypal import (
     PayPalFormatError,
@@ -32,6 +35,7 @@ from app.importers.paypal import (
     parse_paypal_csv,
     preview_paypal_file,
 )
+from app.main import app
 from app.services.import_staging import stage_upload
 from app.services.transaction_review import build_transaction_review
 
@@ -365,8 +369,15 @@ def test_multi_event_group_uses_direct_references_and_reviews_ambiguity(
         [merchant_one, funding_one, bridge, funding_two, merchant_two],
     )
     with factory() as db:
+        raw_codes = {
+            raw.id: raw.raw_payload_json["Transaktionscode"]
+            for raw in db.scalars(select(RawImportRecord))
+        }
         sources = {
-            source.source_transaction_id: source for source in db.scalars(select(SourceTransaction))
+            raw_codes[source.raw_record_id]: source
+            for source in db.scalars(
+                select(SourceTransaction).where(SourceTransaction.source_system == "paypal")
+            )
         }
         canonical = {
             link.source_transaction_id: link.economic_event_id
@@ -380,12 +391,10 @@ def test_multi_event_group_uses_direct_references_and_reviews_ambiguity(
                 select(EventSourceLink).where(EventSourceLink.link_type == "funding_leg")
             )
         }
-        assert funding_links[sources["paypal:SYN-F1"].id] == canonical[sources["paypal:SYN-M1"].id]
-        assert funding_links[sources["paypal:SYN-F2"].id] == canonical[sources["paypal:SYN-M2"].id]
+        assert funding_links[sources["SYN-F1"].id] == canonical[sources["SYN-M1"].id]
+        assert funding_links[sources["SYN-F2"].id] == canonical[sources["SYN-M2"].id]
         bridge_review = db.scalar(
-            select(ReviewItem).where(
-                ReviewItem.source_transaction_id == sources["paypal:SYN-A1"].id
-            )
+            select(ReviewItem).where(ReviewItem.source_transaction_id == sources["SYN-A1"].id)
         )
         assert bridge_review.review_type == "paypal_group_link"
 
@@ -417,10 +426,10 @@ def test_unresolved_row_only_creates_review_and_technical_rows_stay_out_of_revie
         assert db.scalar(select(func.count()).select_from(ReviewItem)) == 1
         rows, _progress = build_transaction_review(db)
         assert len(rows) == 1
-        assert rows[0].source.source_transaction_id == "paypal:SYN-UNKNOWN-1"
+        assert rows[0].source.metadata_json["paypal_semantic"] == "unresolved"
 
 
-def test_duplicate_file_and_row_detection(
+def test_duplicate_file_and_row_detection_distinguishes_staged_and_completed(
     paypal_store: tuple[Settings, sessionmaker[Session]],
 ) -> None:
     settings, factory = paypal_store
@@ -434,9 +443,18 @@ def test_duplicate_file_and_row_detection(
             stream=io.BytesIO(_csv_bytes([row])),
             settings=settings,
         )
-        assert duplicate.duplicate is True
+        assert duplicate.duplicate is False
         assert duplicate.batch.id == first.id
     import_paypal_batch(factory, first.id, settings)
+    with factory() as db:
+        completed = stage_upload(
+            db,
+            source_type="paypal",
+            original_filename="completed-copy.csv",
+            stream=io.BytesIO(_csv_bytes([row])),
+            settings=settings,
+        )
+        assert completed.duplicate is True
     second = _import(
         settings,
         factory,
@@ -464,6 +482,113 @@ def test_full_import_rolls_back_on_failure(
         assert db.scalar(select(func.count()).select_from(RawImportRecord)) == 0
         assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 0
         assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 0
+
+
+def test_failed_batch_can_retry_without_partial_or_duplicate_records(
+    paypal_store: tuple[Settings, sessionmaker[Session]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings, factory = paypal_store
+    batch = _stage(settings, factory, [_row()])
+    original = paypal._import_rows
+
+    def fail_once(db: Session, current: ImportBatch, path: Path) -> int:
+        original(db, current, path)
+        raise RuntimeError("synthetic first attempt failure")
+
+    monkeypatch.setattr(paypal, "_import_rows", fail_once)
+    with pytest.raises(RuntimeError):
+        import_paypal_batch(factory, batch.id, settings)
+    with factory() as db:
+        resumed = stage_upload(
+            db,
+            source_type="paypal",
+            original_filename="retry.csv",
+            stream=io.BytesIO(_csv_bytes([_row()])),
+            settings=settings,
+        )
+        assert resumed.duplicate is False
+        assert resumed.batch.id == batch.id
+        assert resumed.batch.status == "failed"
+    monkeypatch.setattr(paypal, "_import_rows", original)
+    import_paypal_batch(factory, batch.id, settings)
+
+    with factory() as db:
+        assert db.get(ImportBatch, batch.id).status == "imported"
+        assert db.scalar(select(func.count()).select_from(RawImportRecord)) == 1
+        assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 1
+        assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 1
+    with pytest.raises(ValueError, match="valid or failed"):
+        import_paypal_batch(factory, batch.id, settings)
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(RawImportRecord)) == 1
+        assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 1
+        assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 1
+
+
+def test_repeated_paypal_transaction_code_uses_unique_stable_source_ids(
+    paypal_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = paypal_store
+    rows = [
+        _row(**{"Transaktionscode": "SYN-REPEATED", "Brutto": "-10,00", "Netto": "-10,00"}),
+        _row(
+            **{
+                "Datum": "15.09.2026",
+                "Transaktionscode": "SYN-REPEATED",
+                "Brutto": "-20,00",
+                "Netto": "-20,00",
+            }
+        ),
+    ]
+    _import(settings, factory, rows)
+    with factory() as db:
+        source_ids = list(
+            db.scalars(
+                select(SourceTransaction.source_transaction_id).where(
+                    SourceTransaction.source_system == "paypal"
+                )
+            )
+        )
+        assert len(source_ids) == len(set(source_ids)) == 2
+
+
+def test_paypal_stage_preview_execute_and_completed_reexecute_blocked(
+    paypal_store: tuple[Settings, sessionmaker[Session]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings, factory = paypal_store
+    content = _csv_bytes([_row()])
+
+    def override_db() -> Generator[Session, None, None]:
+        with factory() as db:
+            yield db
+
+    monkeypatch.setattr("app.web.routes.get_settings", lambda: settings)
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            staged = client.post(
+                "/import/stage",
+                data={"source_type": "paypal"},
+                files={"upload": ("paypal.csv", content, "text/csv")},
+                follow_redirects=False,
+            )
+            assert staged.status_code == 303
+            assert staged.headers["location"].endswith("/preview")
+            preview = client.get(staged.headers["location"])
+            assert preview.status_code == 200
+            assert "PayPal-Import prüfen" in preview.text
+            batch_id = int(staged.headers["location"].split("/")[-2])
+            executed = client.post(f"/import/{batch_id}/execute", follow_redirects=False)
+            assert executed.status_code == 303
+            repeated = client.post(f"/import/{batch_id}/execute", follow_redirects=False)
+            assert repeated.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+    with factory() as db:
+        assert db.get(ImportBatch, batch_id).status == "imported"
+        assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 1
+        assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 1
 
 
 def test_preview_redacts_email_and_exposes_mutually_exclusive_counts(
@@ -503,4 +628,35 @@ def test_dry_run_is_read_only(
         )
     assert report.source_rows == 1
     assert report.duplicate_file is False
+    assert report.existing_batch_status is None
     assert before == after == (0, 0, 0)
+
+
+def test_dry_run_duplicate_flag_only_marks_completed_import(
+    paypal_store: tuple[Settings, sessionmaker[Session]], tmp_path: Path
+) -> None:
+    settings, factory = paypal_store
+    content = _csv_bytes([_row()])
+    path = tmp_path / "paypal.csv"
+    path.write_bytes(content)
+    with factory() as db:
+        batch = stage_upload(
+            db,
+            source_type="paypal",
+            original_filename="paypal.csv",
+            stream=io.BytesIO(content),
+            settings=settings,
+        ).batch
+        staged = dry_run_paypal_file(path, db)
+        assert staged.duplicate_file is False
+        assert staged.existing_batch_status == "valid"
+        batch.status = "failed"
+        db.commit()
+        failed = dry_run_paypal_file(path, db)
+        assert failed.duplicate_file is False
+        assert failed.existing_batch_status == "failed"
+        batch.status = "imported"
+        db.commit()
+        completed = dry_run_paypal_file(path, db)
+        assert completed.duplicate_file is True
+        assert completed.existing_batch_status == "imported"

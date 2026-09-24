@@ -99,6 +99,9 @@ beziehungsweise Semikolon-CSV. Geldwerte werden ausschließlich als `Decimal`
 normalisiert. Jede neue Zeile erzeugt einen unveränderlichen Raw Record und eine
 normalisierte Source Transaction; Transaktionscode und zugehöriger
 Transaktionscode bilden stabile Gruppen und Fingerprints.
+Da PayPal denselben Transaktionscode in mehreren technisch unterschiedlichen
+Exportzeilen verwenden kann, besteht die persistierte Source-ID aus dem
+zeilenspezifischen stabilen Fingerprint und nicht aus dem Transaktionscode allein.
 
 Abgeschlossene Händlerzahlungen erzeugen genau ein Expense Event pro Händlerzeile.
 Rückzahlungen erzeugen Refund Events und werden bei eindeutiger Referenz additiv
@@ -144,6 +147,12 @@ Entweder werden Raw Records, Source Transactions und Economic Events gemeinsam
 committed oder vollständig zurückgerollt. Ein fehlgeschlagener Batch darf für die
 Diagnose bestehen bleiben. Hash plus eindeutige Source-Fingerprints verhindern
 Datei- und Transaktionsduplikate.
+
+Der Dateihash unterscheidet außerdem den Lebenszyklus: Nur ein Batch mit Status
+`imported` gilt als abgeschlossenes Dateiduplikat. Ein `valid`er oder `failed`er
+Batch bleibt unter derselben Batch-ID vorschau- und ausführbar. Der Retry prüft den
+unveränderten Staging-Hash erneut und läuft wieder vollständig atomar; ein bereits
+abgeschlossener Batch kann dagegen nicht erneut ausgeführt werden.
 
 Aufbewahrungsregeln sind in `.env` konfigurierbar. Sie laufen nie stillschweigend:
 `python -m app.ops retention` zeigt Kandidaten, erst `--apply --confirm` löscht.

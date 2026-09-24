@@ -169,8 +169,20 @@ def stage_upload(
         source_hash = digest.hexdigest()
         duplicate = db.scalar(select(ImportBatch).where(ImportBatch.source_hash == source_hash))
         if duplicate is not None:
-            temp_path.unlink(missing_ok=True)
-            return StageResult(batch=duplicate, duplicate=True)
+            resumable = duplicate.status in {"valid", "failed"}
+            stored_path = (
+                settings.staging_dir / duplicate.stored_filename
+                if duplicate.stored_filename
+                else None
+            )
+            if resumable and stored_path is not None and not stored_path.is_file():
+                os.replace(temp_path, stored_path)
+            else:
+                temp_path.unlink(missing_ok=True)
+            return StageResult(
+                batch=duplicate,
+                duplicate=duplicate.status == "imported" or not resumable,
+            )
 
         stored_filename = f"{source_hash}{suffix}"
         staged_path = settings.staging_dir / stored_filename

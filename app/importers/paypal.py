@@ -133,6 +133,7 @@ class PayPalDryRunReport:
     date_from: str
     date_to: str
     duplicate_file: bool
+    existing_batch_status: str | None
     duplicate_rows: int
     merchant_payments: int
     refunds: int
@@ -505,9 +506,8 @@ def dry_run_paypal_file(path: Path, db: Session) -> PayPalDryRunReport:
     matches = match_sparda_funding(db, rows)
     summary = _summary(rows, matches)
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-    duplicate_file = (
-        db.scalar(select(ImportBatch.id).where(ImportBatch.source_hash == source_hash)) is not None
-    )
+    existing_batch = db.scalar(select(ImportBatch).where(ImportBatch.source_hash == source_hash))
+    duplicate_file = existing_batch is not None and existing_batch.status == "imported"
     fingerprints = {row.fingerprint for row in rows}
     duplicate_rows = len(
         set(
@@ -524,6 +524,7 @@ def dry_run_paypal_file(path: Path, db: Session) -> PayPalDryRunReport:
         date_from=min(dates).isoformat(),
         date_to=max(dates).isoformat(),
         duplicate_file=duplicate_file,
+        existing_batch_status=existing_batch.status if existing_batch else None,
         duplicate_rows=duplicate_rows,
         merchant_payments=summary.merchant_payments,
         refunds=summary.refunds,
@@ -608,11 +609,7 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
             import_batch_id=batch.id,
             raw_record_id=raw.id,
             source_system="paypal",
-            source_transaction_id=(
-                f"paypal:{row.transaction_code}"
-                if row.transaction_code
-                else f"paypal:{row.fingerprint}"
-            ),
+            source_transaction_id=f"paypal:{row.fingerprint}",
             related_source_transaction_id=(
                 f"paypal:{row.related_transaction_code}" if row.related_transaction_code else None
             ),

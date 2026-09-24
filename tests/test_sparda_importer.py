@@ -183,7 +183,7 @@ def test_missing_required_columns_is_rejected_and_quarantined(
     assert batch.validation_json["issues"][0]["code"] == "missing_required_columns"
 
 
-def test_exact_duplicate_file_is_not_staged_twice(
+def test_exact_staged_file_reuses_batch_without_completed_duplicate_flag(
     sparda_store: tuple[Settings, sessionmaker[Session]],
 ) -> None:
     settings, factory = sparda_store
@@ -197,7 +197,7 @@ def test_exact_duplicate_file_is_not_staged_twice(
             stream=io.BytesIO(content),
             settings=settings,
         )
-        assert result.duplicate is True
+        assert result.duplicate is False
         assert result.batch.id == first.id
         assert db.scalar(select(func.count()).select_from(ImportBatch)) == 1
 

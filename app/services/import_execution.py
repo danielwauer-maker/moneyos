@@ -31,8 +31,8 @@ def run_atomic_import(
     try:
         with session_factory() as db, db.begin():
             batch = db.get(ImportBatch, batch_id)
-            if batch is None or batch.status != "valid":
-                raise ValueError("Only a valid batch can be imported")
+            if batch is None or batch.status not in {"valid", "failed"}:
+                raise ValueError("Only a valid or failed batch can be imported")
             path = batch_file_path(batch, settings)
             if _sha256(path) != batch.source_hash:
                 raise ValueError("The staged original no longer matches its recorded hash")
@@ -40,11 +40,12 @@ def run_atomic_import(
             if row_count is not None:
                 batch.row_count = row_count
             batch.status = "imported"
+            batch.imported_at = utc_now()
             batch.updated_at = utc_now()
     except Exception:
         with session_factory() as diagnostics_db, diagnostics_db.begin():
             batch = diagnostics_db.get(ImportBatch, batch_id)
-            if batch is not None and batch.status == "valid":
+            if batch is not None and batch.status in {"valid", "failed"}:
                 batch.status = "failed"
                 batch.validation_json = {
                     "issues": [

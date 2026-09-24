@@ -108,21 +108,43 @@ def test_suspicious_pdf_quarantine_flow(private_store: tuple[Settings, sessionma
     assert batch.detected_mime == "application/pdf"
 
 
-def test_exact_file_duplicate_detection(private_store: tuple[Settings, sessionmaker, Path]) -> None:
+def test_staged_file_is_resumable_not_completed_duplicate(
+    private_store: tuple[Settings, sessionmaker, Path],
+) -> None:
     settings, factory, _ = private_store
     content = b"Datum;Betrag\n2026-01-01;12,34\n"
-    first = _stage(factory, settings, content)
+    first = _stage(factory, settings, content, source_type="bank")
     with factory() as db:
         result = stage_upload(
             db,
-            source_type="sparda",
+            source_type="bank",
+            original_filename="renamed.csv",
+            stream=io.BytesIO(content),
+            settings=settings,
+        )
+        assert result.duplicate is False
+        assert result.batch.id == first.id
+        assert db.scalar(select(func.count()).select_from(ImportBatch)) == 1
+
+
+def test_completed_file_is_duplicate_protected(
+    private_store: tuple[Settings, sessionmaker, Path],
+) -> None:
+    settings, factory, _ = private_store
+    content = b"Datum;Betrag\n2026-01-01;12,34\n"
+    first = _stage(factory, settings, content, source_type="bank")
+    with factory.begin() as db:
+        db.get(ImportBatch, first.id).status = "imported"
+    with factory() as db:
+        result = stage_upload(
+            db,
+            source_type="bank",
             original_filename="renamed.csv",
             stream=io.BytesIO(content),
             settings=settings,
         )
         assert result.duplicate is True
         assert result.batch.id == first.id
-        assert db.scalar(select(func.count()).select_from(ImportBatch)) == 1
 
 
 def test_atomic_import_rolls_back_all_financial_records(

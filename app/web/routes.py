@@ -727,7 +727,10 @@ def upload_import(
         stream=upload.file,
         settings=get_settings(),
     )
-    if result.batch.source_type in {"sparda", "paypal"} and result.batch.status == "valid":
+    if result.batch.source_type in {"sparda", "paypal"} and result.batch.status in {
+        "valid",
+        "failed",
+    }:
         if not result.duplicate:
             return RedirectResponse(f"/import/{result.batch.id}/preview", status_code=303)
         return RedirectResponse(
@@ -742,8 +745,12 @@ def upload_import(
 @router.get("/import/{batch_id}/preview", response_class=HTMLResponse)
 def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLResponse:
     batch = db.get(ImportBatch, batch_id)
-    if batch is None or batch.source_type not in {"sparda", "paypal"} or batch.status != "valid":
-        raise HTTPException(status_code=404, detail="Valid import batch not found")
+    if (
+        batch is None
+        or batch.source_type not in {"sparda", "paypal"}
+        or batch.status not in {"valid", "failed"}
+    ):
+        raise HTTPException(status_code=404, detail="Import batch is not previewable")
     path = batch_file_path(batch, get_settings())
     if batch.source_type == "paypal":
         try:
@@ -784,8 +791,12 @@ def execute_import(batch_id: int, db: DbSession) -> RedirectResponse:
             detail="Produktive Importe sind im Demo-Profil gesperrt.",
         )
     batch = db.get(ImportBatch, batch_id)
-    if batch is None or batch.source_type not in {"sparda", "paypal"} or batch.status != "valid":
-        raise HTTPException(status_code=404, detail="Valid import batch not found")
+    if (
+        batch is None
+        or batch.source_type not in {"sparda", "paypal"}
+        or batch.status not in {"valid", "failed"}
+    ):
+        raise HTTPException(status_code=404, detail="Import batch is not executable")
     factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
     if batch.source_type == "paypal":
         settings = get_settings()

@@ -1,8 +1,9 @@
 from datetime import date, datetime
 from typing import Annotated
+from urllib.parse import parse_qs, urlsplit
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -499,31 +500,15 @@ def project_rename(
 @router.get("/transaction-review", response_class=HTMLResponse)
 def transaction_review(request: Request, db: DbSession) -> HTMLResponse:
     params = request.query_params
-
-    def optional_int(name: str) -> int | None:
-        value = params.get(name)
-        return int(value) if value else None
-
-    rows, progress = build_transaction_review(
-        db,
-        sort=params.get("sort", "newest"),
-        month=params.get("month"),
-        date_from=params.get("date_from"),
-        date_to=params.get("date_to"),
-        merchant=params.get("merchant"),
-        economic_type=params.get("economic_type"),
-        account_id=optional_int("account"),
-        category_id=optional_int("category"),
-        envelope_id=optional_int("envelope"),
-        project_id=optional_int("project"),
-        unresolved_only=params.get("unresolved") == "true",
-    )
+    rows, progress = _build_transaction_review_from_params(db, params)
     return render(
         request,
         "transaction_review.html",
         active="transaction_review",
         page_title="Transaktionsprüfung",
         rows=rows,
+        open_rows=[row for row in rows if not row.fully_reviewed],
+        reviewed_rows=[row for row in rows if row.fully_reviewed],
         progress=progress,
         projects=list(
             db.scalars(select(Project).where(Project.status == "active").order_by(Project.name))
@@ -537,8 +522,36 @@ def transaction_review(request: Request, db: DbSession) -> HTMLResponse:
     )
 
 
+def _build_transaction_review_from_params(db: Session, params):
+    def optional_int(name: str) -> int | None:
+        value = params.get(name)
+        return int(value) if value else None
+
+    return build_transaction_review(
+        db,
+        sort=params.get("sort", "newest"),
+        month=params.get("month"),
+        date_from=params.get("date_from"),
+        date_to=params.get("date_to"),
+        merchant=params.get("merchant"),
+        economic_type=params.get("economic_type"),
+        account_id=optional_int("account"),
+        category_id=optional_int("category"),
+        envelope_id=optional_int("envelope"),
+        project_id=optional_int("project"),
+        unresolved_only=params.get("unresolved") == "true",
+    )
+
+
+def _return_to_params(return_to: str | None) -> dict[str, str]:
+    if not return_to or not return_to.startswith("/transaction-review"):
+        return {}
+    return {key: values[-1] for key, values in parse_qs(urlsplit(return_to).query).items()}
+
+
 @router.post("/transaction-review/decide")
 def decide_transaction_review(
+    request: Request,
     db: DbSession,
     candidate_keys: Annotated[list[str], Form()],
     economic_type: Annotated[str | None, Form()] = None,
@@ -547,10 +560,32 @@ def decide_transaction_review(
     envelope_id: Annotated[int | None, Form()] = None,
     project_decision: Annotated[str | None, Form()] = None,
     project_id: Annotated[int | None, Form()] = None,
+    envelope_choice: Annotated[str | None, Form()] = None,
+    project_choice: Annotated[str | None, Form()] = None,
     create_rule: Annotated[bool, Form()] = False,
     return_to: Annotated[str | None, Form()] = None,
-) -> RedirectResponse:
+) -> Response:
+    row_update = request.headers.get("x-moneyos-row-update") == "1"
+    if row_update and len(candidate_keys) != 1:
+        return JSONResponse(
+            {"error": "Zeilenweises Speichern erfordert genau eine Transaktion"},
+            status_code=422,
+        )
     try:
+        if envelope_choice:
+            if envelope_choice.startswith("assigned:"):
+                envelope_decision = "assigned"
+                envelope_id = int(envelope_choice.removeprefix("assigned:"))
+            else:
+                envelope_decision = envelope_choice
+                envelope_id = None
+        if project_choice:
+            if project_choice.startswith("assigned:"):
+                project_decision = "assigned"
+                project_id = int(project_choice.removeprefix("assigned:"))
+            else:
+                project_decision = project_choice
+                project_id = None
         if envelope_id is not None and envelope_decision is None:
             envelope_decision = "assigned"
         if project_id is not None and project_decision is None:
@@ -567,8 +602,50 @@ def decide_transaction_review(
             create_rule=create_rule,
         )
         db.commit()
-    except ValueError:
+    except (ValueError, TypeError) as exc:
         db.rollback()
+        if row_update:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+    if row_update:
+        params = _return_to_params(return_to)
+        rows, progress = _build_transaction_review_from_params(db, params)
+        key = candidate_keys[0] if len(candidate_keys) == 1 else None
+        row = next((item for item in rows if item.key == key), None)
+        all_rows, _ = build_transaction_review(db)
+        saved_row = next((item for item in all_rows if item.key == key), None)
+        row_html = None
+        if row is not None:
+            row_html = templates.get_template("_transaction_review_row.html").render(
+                request=request,
+                row=row,
+                category_selector_groups=category_selector_groups(db),
+                envelopes=list(
+                    db.scalars(
+                        select(Envelope).where(Envelope.is_active).order_by(Envelope.sort_order)
+                    )
+                ),
+                projects=list(
+                    db.scalars(
+                        select(Project).where(Project.status == "active").order_by(Project.name)
+                    )
+                ),
+                return_to=return_to or "/transaction-review",
+            )
+        return JSONResponse(
+            {
+                "html": row_html,
+                "candidate_key": key,
+                "fully_reviewed": saved_row.fully_reviewed if saved_row else False,
+                "progress": {
+                    "total": progress.total,
+                    "fully_reviewed": progress.fully_reviewed,
+                    "type_unresolved": progress.type_unresolved,
+                    "category_unresolved": progress.category_unresolved,
+                    "envelope_unresolved": progress.envelope_unresolved,
+                    "project_unresolved": progress.project_unresolved,
+                },
+            }
+        )
     return RedirectResponse(
         return_to
         if return_to and (return_to.startswith("/transaction-review") or return_to == "/review")

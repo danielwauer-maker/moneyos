@@ -64,22 +64,24 @@ class TransactionReviewRow:
 
     @property
     def type_resolved(self) -> bool:
-        return self.economic_type in TYPE_VALUES
+        return self.type_decision is not None and self.type_decision.decision in TYPE_VALUES
 
     @property
     def category_resolved(self) -> bool:
-        return self.category is not None
+        return self.category_decision is not None and self.category is not None
 
     @property
     def envelope_resolved(self) -> bool:
-        return self.envelope is not None or (
-            self.envelope_decision is not None and self.envelope_decision.decision == "no_envelope"
+        return self.envelope_decision is not None and (
+            (self.envelope_decision.decision == "assigned" and self.envelope is not None)
+            or self.envelope_decision.decision == "no_envelope"
         )
 
     @property
     def project_resolved(self) -> bool:
-        return self.project is not None or (
-            self.project_decision is not None and self.project_decision.decision == "no_project"
+        return self.project_decision is not None and (
+            (self.project_decision.decision == "assigned" and self.project is not None)
+            or self.project_decision.decision == "no_project"
         )
 
     @property
@@ -93,7 +95,7 @@ class TransactionReviewRow:
 
     @property
     def status(self) -> str:
-        return "Vollständig" if self.fully_reviewed else "Offen"
+        return "✓ Geprüft" if self.fully_reviewed else "Offen"
 
 
 @dataclass(frozen=True)

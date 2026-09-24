@@ -224,3 +224,11 @@ Entscheidungen für wirtschaftlichen Typ, Kategorie, Umschlag und Projekt.
 umbenannt, archiviert und reaktiviert werden; sie besitzen bewusst noch kein
 eigenes Budget. Explizite Entscheidungen sind idempotent und verändern keine
 Raw Records oder Source Transactions.
+
+Die vier Auswahlen einer Tabellenzeile werden zunächst nur lokal vorbereitet.
+Erst `Speichern` übernimmt sie gemeinsam. Die Antwort ersetzt ausschließlich
+die betreffende Zeile und behält die Scrollposition bei. Vollständig bestätigte
+Zeilen wechseln sofort von `Offene Transaktionen` in den eingeklappten Bereich
+`Bereits geprüft`. Vorhandene oder vorgeschlagene Werte gelten dabei nicht als
+Bestätigung; auch `Kein Umschlag` und `Kein Projekt` müssen ausdrücklich gewählt
+werden.

@@ -150,3 +150,9 @@ existing events, while explicit type, category, envelope and project decisions
 are stored independently. A type decision on a review-only source creates one
 canonical Economic Event through the domain service; repeating the decision is
 idempotent. Project decisions never affect balances or envelope actuals.
+
+Phase 2B.9 keeps each row's pending edits in the browser until its own save
+action. The lightweight partial-response endpoint renders one table row rather
+than the full page. Review completion is derived only from explicit decisions
+for all four dimensions; existing event values and suggestions remain visibly
+open until confirmed. No migration or background reclassification is involved.

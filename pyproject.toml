@@ -35,6 +35,7 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+exclude = [".venv", ".pytest-temp", "backups", "data", "logs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

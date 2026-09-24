@@ -1,0 +1,39 @@
+.review-sort-toolbar {
+  margin: 18px 0;
+}
+
+.reviewed-transactions {
+  margin-top: 22px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.reviewed-transactions > summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 18px 21px;
+}
+
+.reviewed-transactions .table-panel {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.resolved-value {
+  color: #287657;
+  font-weight: 700;
+}
+
+.unresolved-value {
+  color: #9a6208;
+  font-weight: 600;
+}
+
+.row-save-status {
+  display: block;
+  min-height: 16px;
+  margin-top: 4px;
+  color: var(--muted);
+}

@@ -98,6 +98,7 @@ def test_no_project_is_resolved_and_dimensions_are_independent(db: Session) -> N
     apply_transaction_decision(
         db,
         candidate_keys=[f"source:{source.id}"],
+        economic_type="expense",
         category_id=category.id,
         envelope_decision="assigned",
         envelope_id=envelope.id,
@@ -110,6 +111,24 @@ def test_no_project_is_resolved_and_dimensions_are_independent(db: Session) -> N
     assert row.project is None
     assert row.project_resolved
     assert row.fully_reviewed
+
+
+def test_existing_values_remain_open_until_explicitly_confirmed(db: Session) -> None:
+    _source(db, "existing-open", 3, event_type="expense")
+    category = Category(name="Vorhandene Kategorie")
+    db.add(category)
+    db.flush()
+    event = db.scalar(select(EconomicEvent))
+    event.category_id = category.id
+    db.commit()
+
+    row = build_transaction_review(db)[0][0]
+    assert not row.type_resolved
+    assert not row.category_resolved
+    assert not row.envelope_resolved
+    assert not row.project_resolved
+    assert not row.fully_reviewed
+    assert row.status == "Offen"
 
 
 def test_type_confirmation_creates_one_event_for_review_only(db: Session) -> None:
@@ -314,3 +333,96 @@ def test_category_picker_order_is_shared_across_review_workflows(db: Session) ->
         assert alpha_pos < zulu_pos
         assert alpha_pos < first_child_pos < second_child_pos < zulu_pos
         assert "● Alpha (Hauptkategorie)" in text
+
+
+def test_row_save_is_partial_and_moves_completed_row_to_reviewed(db: Session) -> None:
+    source = _source(db, "partial-save", 12, event_type="expense")
+    category = Category(name="Synthetisch bestätigt")
+    db.add(category)
+    db.commit()
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            before = client.get("/transaction-review?sort=oldest")
+            response = client.post(
+                "/transaction-review/decide",
+                headers={"X-MoneyOS-Row-Update": "1"},
+                data={
+                    "candidate_keys": f"source:{source.id}",
+                    "economic_type": "expense",
+                    "category_id": str(category.id),
+                    "envelope_choice": "no_envelope",
+                    "project_choice": "no_project",
+                    "return_to": "/transaction-review?sort=oldest",
+                },
+            )
+            after = client.get("/transaction-review?sort=oldest")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert before.status_code == 200
+    assert before.text.index(f'id="transaction-row-{source.id}"') < before.text.index(
+        'id="reviewed-review-body"'
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["fully_reviewed"] is True
+    assert "<html" not in payload["html"].casefold()
+    assert "✓ Geprüft" in payload["html"]
+    assert "✓ Kein Umschlag" in payload["html"]
+    assert "✓ Kein Projekt" in payload["html"]
+    reviewed_body = after.text.index('id="reviewed-review-body"')
+    assert after.text.index(f'id="transaction-row-{source.id}"') > reviewed_body
+
+
+def test_dropdowns_do_not_submit_and_workflow_preserves_scroll(db: Session) -> None:
+    _source(db, "no-change-submit", 13, event_type="expense")
+    db.commit()
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            page = client.get("/transaction-review")
+    finally:
+        app.dependency_overrides.clear()
+
+    script = Path("app/web/static/app.js").read_text(encoding="utf-8")
+    assert page.status_code == 200
+    assert "onchange=" not in page.text
+    assert 'name="economic_type"' in page.text
+    assert 'name="envelope_choice"' in page.text
+    assert 'name="project_choice"' in page.text
+    assert 'addEventListener("submit"' in script
+    assert 'addEventListener("change"' not in script
+    assert "window.scrollY" in script
+    assert "window.scrollTo" in script
+    assert "scrollIntoView" in script
+
+
+def test_review_page_has_prominent_date_sort_and_separate_sections(db: Session) -> None:
+    _source(db, "sort-controls", 14, event_type="expense")
+    db.commit()
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            page = client.get("/transaction-review?sort=oldest")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert page.status_code == 200
+    assert "Älteste zuerst" in page.text
+    assert "Neueste zuerst" in page.text
+    assert "Offene Transaktionen" in page.text
+    assert "Bereits geprüft" in page.text
+    assert '<details class="panel reviewed-transactions">' in page.text

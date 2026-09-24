@@ -1,0 +1,40 @@
+{% from "_category_picker.html" import category_picker %}
+{% set form_id = 'review-row-' ~ row.source.id %}
+{% set type_labels = {'expense':'Ausgabe','income':'Einnahme','refund':'Refund','transfer':'Transfer','review':'Prüfung'} %}
+<tr id="transaction-row-{{ row.source.id }}" data-review-row data-candidate-key="{{ row.key }}" data-sort-key="{{ row.booked_at.isoformat() }}-{{ '%010d'|format(row.source.id) }}" data-reviewed="{{ 'true' if row.fully_reviewed else 'false' }}">
+  <td>
+    <input form="bulk-review" type="checkbox" name="candidate_keys" value="{{ row.key }}" aria-label="{{ row.raw_counterparty }} auswählen">
+    <form id="{{ form_id }}" action="/transaction-review/decide" method="post" data-review-row-form>
+      <input type="hidden" name="candidate_keys" value="{{ row.key }}">
+      <input type="hidden" name="return_to" value="{{ return_to }}">
+    </form>
+  </td>
+  <td>{{ row.booked_at.strftime('%d.%m.%Y') }}</td>
+  <td><strong>{{ row.raw_counterparty }}</strong>{% if row.secondary_detail %}<br><small class="transaction-detail">{{ row.secondary_detail }}</small>{% endif %}{% if row.canonical_merchant != row.raw_counterparty %}<br><span class="merchant-hint">Erkannt: {{ row.canonical_merchant }}</span>{% endif %}</td>
+  <td class="amount {% if row.economic_type == 'expense' %}red{% elif row.economic_type in ['income','refund'] %}green{% endif %}">{{ '-' if row.economic_type == 'expense' else ('+' if row.economic_type in ['income','refund'] else '') }}{{ row.amount|euro }}</td>
+  <td>{{ row.account.name if row.account else 'Nicht zugeordnet' }}</td>
+  <td>
+    <select form="{{ form_id }}" name="economic_type" aria-label="Wirtschaftlichen Typ wählen">
+      <option value="">Keine Änderung</option><option value="expense">Ausgabe</option><option value="income">Einnahme</option><option value="refund">Refund</option><option value="transfer">Transfer</option>
+    </select><br>
+    {% if row.type_resolved %}<small class="resolved-value">✓ {{ type_labels.get(row.economic_type, row.economic_type) }}</small>{% else %}<small class="unresolved-value">Offen{% if row.economic_type in type_labels %} · Aktuell: {{ type_labels[row.economic_type] }}{% elif row.proposed_type %} · Vorschlag: {{ type_labels.get(row.proposed_type, row.proposed_type) }}{% endif %}</small>{% endif %}
+  </td>
+  <td>
+    {{ category_picker(category_selector_groups, 'category_id', 'transaction-review-row-category-' ~ row.source.id, 'Keine Änderung', '', 'Kategorie für ' ~ row.raw_counterparty, false, form_id) }}<br>
+    {% if row.category_resolved %}<small class="resolved-value">✓ {{ row.category.name }}</small>{% else %}<small class="unresolved-value">Offen{% if row.category %} · Aktuell: {{ row.category.name }}{% elif row.proposed_category %} · Vorschlag: {{ row.proposed_category.name }}{% endif %}</small>{% endif %}
+  </td>
+  <td>
+    <select form="{{ form_id }}" name="envelope_choice" aria-label="Umschlagentscheidung wählen">
+      <option value="">Keine Änderung</option>{% for item in envelopes %}<option value="assigned:{{ item.id }}">{{ item.name }}</option>{% endfor %}<option value="no_envelope">Kein Umschlag</option><option value="later">Später prüfen</option>
+    </select><br>
+    {% if row.envelope_resolved and row.envelope %}<small class="resolved-value">✓ {{ row.envelope.name }}</small>{% elif row.envelope_resolved %}<small class="resolved-value">✓ Kein Umschlag</small>{% else %}<small class="unresolved-value">Offen{% if row.envelope %} · Aktuell: {{ row.envelope.name }}{% elif row.proposed_envelope %} · Vorschlag: {{ row.proposed_envelope.name }}{% endif %}</small>{% endif %}
+  </td>
+  <td>
+    <select form="{{ form_id }}" name="project_choice" aria-label="Projektentscheidung wählen">
+      <option value="">Keine Änderung</option>{% for item in projects %}<option value="assigned:{{ item.id }}">{{ item.name }}</option>{% endfor %}<option value="no_project">Kein Projekt</option><option value="later">Später prüfen</option>
+    </select><br>
+    {% if row.project_resolved and row.project %}<small class="resolved-value">✓ {{ row.project.name }}</small>{% elif row.project_resolved %}<small class="resolved-value">✓ Kein Projekt</small>{% else %}<small class="unresolved-value">Offen{% if row.project %} · Aktuell: {{ row.project.name }}{% elif row.proposed_project %} · Vorschlag: {{ row.proposed_project.name }}{% endif %}</small>{% endif %}
+  </td>
+  <td><span class="badge {% if row.fully_reviewed %}success{% else %}warning{% endif %}">{{ row.status }}</span></td>
+  <td><button form="{{ form_id }}" class="primary-button" type="submit">Speichern</button><small class="row-save-status" aria-live="polite"></small></td>
+</tr>

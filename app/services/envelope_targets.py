@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
@@ -14,8 +14,6 @@ from app.db.models import (
     EnvelopeMovement,
     EnvelopeSnapshot,
     EventSourceLink,
-    ReviewItem,
-    SourceTransaction,
 )
 from app.domain.envelopes import physical_balance
 from app.domain.reconciliation import ReconciliationResult, reconcile_envelopes

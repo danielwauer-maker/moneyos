@@ -292,7 +292,10 @@ def category_groups(db: Session) -> tuple[CategoryGroup, ...]:
     event_counts = dict(
         db.execute(
             select(EconomicEvent.category_id, func.count(EconomicEvent.id))
-            .where(EconomicEvent.category_id.is_not(None))
+            .where(
+                EconomicEvent.category_id.is_not(None),
+                EconomicEvent.status.in_(("booked", "confirmed")),
+            )
             .group_by(EconomicEvent.category_id)
         ).all()
     )

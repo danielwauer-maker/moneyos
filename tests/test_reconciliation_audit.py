@@ -85,9 +85,7 @@ def test_paypal_credit_card_funding_matches_amex_without_mutation(tmp_path: Path
             after = db.scalar(select(func.count()).select_from(SourceTransaction))
 
         matches = [
-            candidate
-            for candidate in report.candidates or []
-            if candidate.kind == "paypal_amex"
+            candidate for candidate in report.candidates or [] if candidate.kind == "paypal_amex"
         ]
         assert before == after == 2
         assert len(matches) == 1

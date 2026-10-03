@@ -244,6 +244,8 @@ def test_group_creates_one_expense_and_links_technical_rows(
         }
         assert batch.metadata_json["import_summary"]["merchant_payments"] == 1
         assert batch.metadata_json["import_summary"]["technical_funding_rows"] == 2
+        assert batch.metadata_json["import_summary"]["imported_expenses"] == 1
+        assert batch.metadata_json["import_summary"]["imported_refunds"] == 0
         paypal_account = db.scalar(select(Account).where(Account.name == "PayPal"))
         assert paypal_account.balance == D("0.00")
         assert paypal_account.balance_confirmed is False
@@ -263,7 +265,9 @@ def test_refund_is_linked_to_origin_and_not_income(
             "Zugehöriger Transaktionscode": "SYN-MERCHANT-1",
         }
     )
-    _import(settings, factory, [_row(), refund])
+    batch = _import(settings, factory, [_row(), refund])
+    assert batch.metadata_json["import_summary"]["imported_expenses"] == 1
+    assert batch.metadata_json["import_summary"]["imported_refunds"] == 1
     with factory() as db:
         assert list(db.scalars(select(EconomicEvent.event_type).order_by(EconomicEvent.id))) == [
             "expense",

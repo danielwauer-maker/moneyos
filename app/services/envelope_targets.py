@@ -19,6 +19,7 @@ from app.db.models import (
 )
 from app.domain.envelopes import physical_balance
 from app.domain.reconciliation import ReconciliationResult, reconcile_envelopes
+from app.services.reviews import actionable_open_reviews
 
 ZERO = Decimal("0")
 CONFIRMED_EVENT_STATUSES = frozenset({"booked", "confirmed"})
@@ -226,13 +227,12 @@ def calculate_envelope_targets(
                     )
                 }
             )
-    open_review_event_ids = set(
-        db.scalars(
-            select(ReviewItem.economic_event_id).where(
-                ReviewItem.status == "open", ReviewItem.economic_event_id.is_not(None)
-            )
-        )
-    )
+    actionable_reviews = actionable_open_reviews(db)
+    open_review_event_ids = {
+        review.economic_event_id
+        for review in actionable_reviews
+        if review.economic_event_id is not None
+    }
     event_keys = {
         event.id: _source_token(event.id, links_by_event.get(event.id, [])) for event in events
     }
@@ -276,19 +276,14 @@ def calculate_envelope_targets(
         token = _source_token(event.id, links_by_event.get(event.id, []))
         unresolved[token] = None
 
-    review_rows = db.execute(
-        select(ReviewItem, SourceTransaction)
-        .join(SourceTransaction, SourceTransaction.id == ReviewItem.source_transaction_id)
-        .where(
-            ReviewItem.status == "open",
-            or_(
-                ReviewItem.proposed_event_type.in_(("expense", "refund")),
-                ReviewItem.proposed_event_type.is_(None),
-            ),
-            SourceTransaction.booked_at >= period_start,
-            SourceTransaction.booked_at < period_end,
-        )
-    ).all()
+    review_rows = [
+        (review, review.source_transaction)
+        for review in actionable_reviews
+        if review.source_transaction is not None
+        and review.source_transaction.booked_at >= period_start
+        and review.source_transaction.booked_at < period_end
+        and review.proposed_event_type in {"expense", "refund", None}
+    ]
     for review, source in review_rows:
         token = f"source:{source.id}"
         proposed = (

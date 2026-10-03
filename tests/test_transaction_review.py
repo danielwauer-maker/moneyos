@@ -113,6 +113,62 @@ def test_no_project_is_resolved_and_dimensions_are_independent(db: Session) -> N
     assert row.fully_reviewed
 
 
+def test_resolved_transfer_without_category_is_category_resolved(db: Session) -> None:
+    source = _source(db, "transfer-no-category", 9, event_type="transfer")
+    db.commit()
+
+    apply_transaction_decision(
+        db,
+        candidate_keys=[f"source:{source.id}"],
+        economic_type="transfer",
+    )
+    db.commit()
+
+    row = build_transaction_review(db, sort="oldest")[0][0]
+    assert row.type_resolved
+    assert row.category is None
+    assert row.category_decision is None
+    assert row.category_resolved
+
+
+def test_resolved_transfer_without_category_can_be_fully_reviewed(db: Session) -> None:
+    source = _source(db, "transfer-fully-reviewed", 10, event_type="transfer")
+    db.commit()
+
+    apply_transaction_decision(
+        db,
+        candidate_keys=[f"source:{source.id}"],
+        economic_type="transfer",
+        envelope_decision="no_envelope",
+        project_decision="no_project",
+    )
+    db.commit()
+
+    row = build_transaction_review(db, sort="oldest")[0][0]
+    assert row.category_resolved
+    assert row.envelope_resolved
+    assert row.project_resolved
+    assert row.fully_reviewed
+
+
+@pytest.mark.parametrize("event_type", ["expense", "income", "refund"])
+def test_non_transfer_without_category_remains_unresolved(db: Session, event_type: str) -> None:
+    source = _source(db, f"{event_type}-no-category", 11, event_type=event_type)
+    db.commit()
+
+    apply_transaction_decision(
+        db,
+        candidate_keys=[f"source:{source.id}"],
+        economic_type=event_type,
+    )
+    db.commit()
+
+    row = build_transaction_review(db, sort="oldest")[0][0]
+    assert row.type_resolved
+    assert not row.category_resolved
+    assert not row.fully_reviewed
+
+
 def test_existing_values_remain_open_until_explicitly_confirmed(db: Session) -> None:
     _source(db, "existing-open", 3, event_type="expense")
     category = Category(name="Vorhandene Kategorie")

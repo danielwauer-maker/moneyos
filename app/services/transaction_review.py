@@ -68,6 +68,12 @@ class TransactionReviewRow:
 
     @property
     def category_resolved(self) -> bool:
+        # Transfers are account movements rather than merchant spending.  Once
+        # the user explicitly confirms the transfer type, a category is not a
+        # required review dimension and no artificial "Transfer" category is
+        # needed.
+        if self.type_resolved and self.economic_type == "transfer":
+            return True
         return self.category_decision is not None and self.category is not None
 
     @property

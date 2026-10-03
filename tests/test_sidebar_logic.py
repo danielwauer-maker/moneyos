@@ -31,7 +31,6 @@ from app.services.envelope_targets import calculate_envelope_targets
 from app.services.reviews import actionable_review_count
 from app.services.transaction_review import apply_transaction_decision
 
-
 D = Decimal
 
 

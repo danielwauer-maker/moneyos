@@ -397,9 +397,25 @@ def _decision_timestamp() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def _attach_candidate_decisions_to_event(
+    db: Session, row: TransactionReviewRow, event: EconomicEvent
+) -> None:
+    """Backfill event references for decisions made before an event existed."""
+    for model in (
+        EconomicTypeAssignmentDecision,
+        CategoryAssignmentDecision,
+        EnvelopeAssignmentDecision,
+        ProjectAssignmentDecision,
+    ):
+        record = db.scalar(select(model).where(model.candidate_key == row.key))
+        if record is not None and record.economic_event_id is None:
+            record.economic_event_id = event.id
+
+
 def _get_or_create_event(db: Session, row: TransactionReviewRow, event_type: str) -> EconomicEvent:
     if row.event is not None:
         row.event.event_type = event_type
+        _attach_candidate_decisions_to_event(db, row, row.event)
         return row.event
     existing_link = db.scalar(
         select(EventSourceLink).where(
@@ -411,6 +427,7 @@ def _get_or_create_event(db: Session, row: TransactionReviewRow, event_type: str
         event = db.get(EconomicEvent, existing_link.economic_event_id)
         if event:
             event.event_type = event_type
+            _attach_candidate_decisions_to_event(db, row, event)
             return event
     account = row.account
     event = EconomicEvent(
@@ -438,6 +455,7 @@ def _get_or_create_event(db: Session, row: TransactionReviewRow, event_type: str
     )
     if row.review:
         row.review.economic_event_id = event.id
+    _attach_candidate_decisions_to_event(db, row, event)
     return event
 
 

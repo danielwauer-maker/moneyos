@@ -12,6 +12,7 @@ from app.db.models import (
     AmazonPaymentMatch,
     EconomicEvent,
     EventSourceLink,
+    RawImportRecord,
     SourceTransaction,
 )
 
@@ -98,12 +99,72 @@ def _candidate(
     )
 
 
+def _amazon_source(source: SourceTransaction) -> bool:
+    text = " ".join(
+        (
+            source.merchant_raw or "",
+            source.description_raw or "",
+            str((source.metadata_json or {}).get("canonical_merchant", "")),
+        )
+    ).casefold()
+    return any(marker in text for marker in ("amazon", "amzn", "audible", "kindle"))
+
+
+def _payment_sources(payment_method: str | None) -> set[str]:
+    text = (payment_method or "").casefold()
+    result: set[str] = set()
+    if "american express" in text or "amex" in text:
+        result.add("amex")
+    if "paypal" in text:
+        result.add("paypal")
+    if any(marker in text for marker in ("bank", "lastschrift", "giro", "sepa")):
+        result.add("sparda")
+    return result
+
+
+def _raw_money(value: object) -> Decimal | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    cleaned = "".join(character for character in text if character.isdigit() or character in ",.-")
+    if not cleaned:
+        return None
+    if "," in cleaned and "." in cleaned:
+        if cleaned.rfind(",") > cleaned.rfind("."):
+            cleaned = cleaned.replace(".", "").replace(",", ".")
+        else:
+            cleaned = cleaned.replace(",", "")
+    elif "," in cleaned:
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+    try:
+        return abs(Decimal(cleaned))
+    except Exception:
+        return None
+
+
+def _amazon_payment_amount(
+    rows: list[AmazonEnrichmentRecord],
+    raw_by_id: dict[int, RawImportRecord],
+) -> Decimal:
+    totals = {
+        value
+        for row in rows
+        if (raw := raw_by_id.get(row.raw_record_id))
+        and (value := _raw_money((raw.raw_payload_json or {}).get("Total Amount"))) is not None
+        and value != 0
+    }
+    if len(totals) == 1:
+        return next(iter(totals))
+    return sum((abs(row.amount or Decimal("0")) for row in rows), Decimal("0"))
+
+
 def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
     sources = list(db.scalars(select(SourceTransaction)))
     events = list(db.scalars(select(EconomicEvent)))
     links = list(db.scalars(select(EventSourceLink)))
     amazon = list(db.scalars(select(AmazonEnrichmentRecord)))
     amazon_matches = list(db.scalars(select(AmazonPaymentMatch)))
+    raw_records = list(db.scalars(select(RawImportRecord)))
 
     by_system: dict[str, list[SourceTransaction]] = defaultdict(list)
     for source in sources:
@@ -264,8 +325,19 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
         )
 
     matched_amazon_ids = {match.amazon_record_id for match in amazon_matches}
+    raw_by_id = {record.id: record for record in raw_records}
+    source_by_id = {source.id: source for source in sources}
 
-    # Amazon direct and grouped split matches -> existing EconomicEvents
+    canonical_sources_by_event: dict[int, list[SourceTransaction]] = defaultdict(list)
+    for link in links:
+        if link.link_type != "canonical_source":
+            continue
+        source = source_by_id.get(link.source_transaction_id)
+        if source is not None:
+            canonical_sources_by_event[link.economic_event_id].append(source)
+
+    # Amazon payment evidence: orders are grouped by order; refund evidence is collapsed
+    # by order/date/amount so duplicate export rows do not double the economic value.
     relevant = [
         row
         for row in amazon
@@ -275,65 +347,80 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
         and row.record_type in {"order_item", "digital_order_item", "refund"}
     ]
 
-    groups: dict[tuple[str, str], list[AmazonEnrichmentRecord]] = defaultdict(list)
+    order_groups: dict[str, list[AmazonEnrichmentRecord]] = defaultdict(list)
+    refund_groups: dict[tuple[str, str, str], list[AmazonEnrichmentRecord]] = defaultdict(list)
     for row in relevant:
-        key = row.order_key or f"record:{row.id}"
-        groups[(row.record_type, key)].append(row)
+        if row.record_type == "refund":
+            refund_key = (
+                row.order_key or f"record:{row.id}",
+                format(abs(row.amount or Decimal("0")), ".2f"),
+                row.occurred_at.date().isoformat(),
+            )
+            refund_groups[refund_key].append(row)
+        else:
+            order_groups[row.order_key or f"record:{row.id}"].append(row)
 
-    for (record_type, _key), rows in groups.items():
-        total = sum((abs(row.amount or Decimal("0")) for row in rows), Decimal("0"))
-        if total == 0:
+    amazon_groups: list[tuple[str, list[AmazonEnrichmentRecord], Decimal]] = []
+    for rows in order_groups.values():
+        amazon_groups.append(("payment", rows, _amazon_payment_amount(rows, raw_by_id)))
+    for rows in refund_groups.values():
+        amazon_groups.append(("refund", rows, abs(rows[0].amount or Decimal("0"))))
+
+    for match_type, rows, amount in amazon_groups:
+        if amount == 0:
             continue
         occurred_at = min(row.occurred_at for row in rows if row.occurred_at is not None)
-        expected_event_type = "refund" if record_type == "refund" else "expense"
-        matches = [
-            event
-            for event in events
-            if event.event_type == expected_event_type
-            and event.currency == (rows[0].currency or event.currency)
-            and _same_amount(event.amount, total)
-            and _days(event.occurred_at, occurred_at) <= 3
-        ]
+        expected_event_type = "refund" if match_type == "refund" else "expense"
+        hints = set().union(*(_payment_sources(row.payment_method) for row in rows))
 
-        source_systems: set[str] = set()
-        for event in matches:
-            for link in links:
-                if link.economic_event_id != event.id:
-                    continue
-                source = next(
-                    (item for item in sources if item.id == link.source_transaction_id), None
-                )
-                if source:
-                    source_systems.add(source.source_system)
+        matches: list[tuple[EconomicEvent, SourceTransaction, int]] = []
+        for event in events:
+            if event.event_type != expected_event_type or not _same_amount(event.amount, amount):
+                continue
+            if event.currency != (rows[0].currency or event.currency):
+                continue
+            days = _days(event.occurred_at, occurred_at)
+            if days > (21 if match_type == "refund" else 10):
+                continue
+            canonical_sources = canonical_sources_by_event.get(event.id, [])
+            amazon_sources = [source for source in canonical_sources if _amazon_source(source)]
+            if not amazon_sources:
+                continue
+            source = amazon_sources[0]
+            if hints and source.source_system not in hints:
+                continue
+            matches.append((event, source, days))
 
+        matches.sort(key=lambda item: item[2])
         if len(matches) == 1:
-            confidence = (
-                "high"
-                if len(rows) > 1 or source_systems & {"amex", "paypal", "sparda"}
-                else "medium"
-            )
-            score = Decimal("0.94") if confidence == "high" else Decimal("0.75")
-            target_id = matches[0].id
+            event, _source, days = matches[0]
+            if days <= 3:
+                confidence, score = "high", Decimal("0.98")
+            else:
+                confidence, score = "medium", Decimal("0.75")
+            target_id = event.id
+        elif matches and len(matches) > 1 and matches[0][2] < matches[1][2]:
+            event, _source, match_days = matches[0]
+            confidence, score, target_id = "medium", Decimal("0.65"), event.id
         else:
-            confidence = "unresolved"
-            score = Decimal("0")
-            target_id = None
+            confidence, score, target_id = "unresolved", Decimal("0"), None
 
+        duplicate_evidence = len(rows) if match_type == "refund" else 1
         candidates.append(
             _candidate(
-                kind="amazon_refund" if record_type == "refund" else "amazon_payment",
+                kind="amazon_refund" if match_type == "refund" else "amazon_payment",
                 confidence=confidence,
                 score=score,
-                amount=total,
+                amount=amount,
                 occurred_at=occurred_at,
                 source_id=rows[0].id,
                 target_id=target_id,
                 detail=(
-                    f"Amazon-Gruppe mit {len(rows)} Position(en), Summe {total:.2f} EUR."
-                    if matches
-                    else (
-                        f"Amazon-Gruppe mit {len(rows)} Position(en); "
-                        f"{len(matches)} passende Events."
+                    f"Amazon-{match_type}: {len(rows)} Evidenzzeile(n), Betrag {amount:.2f} EUR"
+                    + (
+                        f"; {duplicate_evidence} gleichartige Refund-Evidenzen zusammengefasst."
+                        if match_type == "refund" and duplicate_evidence > 1
+                        else "."
                     )
                 ),
             )

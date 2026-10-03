@@ -152,14 +152,8 @@ def _import(
 
 
 def test_embedded_quotes_and_commas_parse_after_sniffer_sample(tmp_path: Path) -> None:
-    rows = [
-        _row(**{"Transaktionscode": f"SYN-FILL-{index}"})
-        for index in range(100)
-    ]
-    item_name = (
-        'Eukalyptus "Gunni" gruen, Olivenzweige im Bund, '
-        'Blumenmesser "Blumigo" violett'
-    )
+    rows = [_row(**{"Transaktionscode": f"SYN-FILL-{index}"}) for index in range(100)]
+    item_name = 'Eukalyptus "Gunni" gruen, Olivenzweige im Bund, Blumenmesser "Blumigo" violett'
     rows.append(
         _row(
             **{

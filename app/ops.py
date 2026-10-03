@@ -14,6 +14,7 @@ from app.services.balance_confirmations import backfill_sparda_imported_balance
 from app.services.diagnostics import diagnostics_as_dicts
 from app.services.import_staging import delete_staged_file
 from app.services.private_profile import initialize_private_profile
+from app.services.reconciliation_audit import audit_reconciliation
 from app.services.retention import apply_retention, plan_retention
 from app.services.sparda_reclassification import (
     apply_sparda_reclassification,
@@ -70,6 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read-only structural, duplicate and payment-match audit of an Amazon ZIP",
     )
     amazon_audit.add_argument("file", type=Path)
+    commands.add_parser(
+        "audit-reconciliation",
+        help="Read-only cross-source reconciliation audit for imported private data",
+    )
     return parser
 
 
@@ -173,6 +178,12 @@ def main() -> None:
         with SessionLocal() as db:
             report = dry_run_amazon_file(args.file, db, settings.amazon_import_start_date)
         print(json.dumps(report, indent=2, ensure_ascii=True))
+    elif args.command == "audit-reconciliation":
+        if settings.demo_mode:
+            raise ValueError("audit-reconciliation requires MONEYOS_DEMO_MODE=false")
+        with SessionLocal() as db:
+            report = audit_reconciliation(db)
+        print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
 
 
 if __name__ == "__main__":

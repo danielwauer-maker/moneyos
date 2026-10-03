@@ -1,1 +1,1 @@
-{% extends "base.html" %}{% block content %}<article class="panel placeholder"><span>◇</span><h2>{{ section }}</h2><p>{{ description }}</p><div class="badge neutral">Phase-1-Grundseite</div></article>{% endblock %}
+{% extends "base.html" %}{% block content %}<article class="panel placeholder"><span>◇</span><h2>{{ section }}</h2><p>{{ description }}</p><div class="badge neutral">{{ status_label|default('Noch nicht produktiv') }}</div></article>{% endblock %}

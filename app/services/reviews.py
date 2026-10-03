@@ -4,8 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from app.db.models import RawImportRecord, ReviewItem
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+
+from app.db.models import RawImportRecord, ReviewItem, SourceTransaction, SourceTransactionAccount
 from app.services.transaction_details import derive_transaction_detail
+from app.services.transaction_review import build_transaction_review
 
 TYPE_LABELS = {
     "expense": "Ausgabe",
@@ -68,3 +72,42 @@ def build_review_view(review: ReviewItem, raw: RawImportRecord | None = None) ->
         proposed_envelope=(review.proposed_envelope.name if review.proposed_envelope else "Keiner"),
         proposed_project=(review.proposed_project.name if review.proposed_project else "Keines"),
     )
+
+
+def actionable_review_items(db: Session) -> list[ReviewItem]:
+    """Return only review items that still require a user decision.
+
+    Importers deliberately keep their immutable review evidence. A later explicit
+    transaction decision can make a source transaction complete while its original
+    ReviewItem still has status open. The inbox follows the current decision state
+    rather than stale importer workflow state.
+    """
+    rows, _ = build_transaction_review(db)
+    by_source = {row.source.id: row for row in rows}
+    reviews = list(
+        db.scalars(
+            select(ReviewItem)
+            .where(ReviewItem.status == "open")
+            .options(
+                selectinload(ReviewItem.economic_event),
+                selectinload(ReviewItem.proposed_category),
+                selectinload(ReviewItem.proposed_envelope),
+                selectinload(ReviewItem.proposed_project),
+                selectinload(ReviewItem.source_transaction)
+                .selectinload(SourceTransaction.account_links)
+                .selectinload(SourceTransactionAccount.account),
+            )
+            .order_by(ReviewItem.id)
+        )
+    )
+    return [
+        review
+        for review in reviews
+        if review.source_transaction_id is None
+        or review.source_transaction_id not in by_source
+        or not by_source[review.source_transaction_id].fully_reviewed
+    ]
+
+
+def actionable_review_count(db: Session) -> int:
+    return len(actionable_review_items(db))

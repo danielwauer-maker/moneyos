@@ -60,19 +60,22 @@ class EnvelopeCandidate:
 
     @property
     def state(self) -> str:
+        # Existing event values are context, not an explicit review decision.
+        # Only a durable assignment decision resolves the envelope dimension.
         if self.decision is not None:
             return self.decision.decision
-        if self.current_envelope is not None:
-            return "assigned"
         return "unresolved"
 
     @property
     def category_confirmed(self) -> bool:
-        return self.category is not None
+        # Keep this workspace aligned with chronological review semantics:
+        # a pre-existing category is not considered confirmed until the user
+        # explicitly records a category decision.
+        return self.category_decision is not None and self.category is not None
 
     @property
     def envelope_confirmed(self) -> bool:
-        return self.state in {"assigned", "no_envelope"}
+        return self.decision is not None and self.decision.decision in {"assigned", "no_envelope"}
 
     @property
     def fully_reviewed(self) -> bool:

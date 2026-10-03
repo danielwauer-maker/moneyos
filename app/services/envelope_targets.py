@@ -14,11 +14,11 @@ from app.db.models import (
     EnvelopeMovement,
     EnvelopeSnapshot,
     EventSourceLink,
-    ReviewItem,
     SourceTransaction,
 )
 from app.domain.envelopes import physical_balance
 from app.domain.reconciliation import ReconciliationResult, reconcile_envelopes
+from app.services.reviews import actionable_review_items
 
 ZERO = Decimal("0")
 CONFIRMED_EVENT_STATUSES = frozenset({"booked", "confirmed"})
@@ -226,13 +226,11 @@ def calculate_envelope_targets(
                     )
                 }
             )
-    open_review_event_ids = set(
-        db.scalars(
-            select(ReviewItem.economic_event_id).where(
-                ReviewItem.status == "open", ReviewItem.economic_event_id.is_not(None)
-            )
-        )
-    )
+    open_review_event_ids = {
+        review.economic_event_id
+        for review in actionable_review_items(db)
+        if review.economic_event_id is not None
+    }
     event_keys = {
         event.id: _source_token(event.id, links_by_event.get(event.id, [])) for event in events
     }

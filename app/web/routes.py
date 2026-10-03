@@ -15,7 +15,6 @@ from app.db.models import (
     ImportBatch,
     Project,
     RawImportRecord,
-    ReviewItem,
     SourceTransaction,
     SourceTransactionAccount,
 )
@@ -68,7 +67,7 @@ from app.services.import_staging import (
     is_batch_previewable,
     stage_upload,
 )
-from app.services.reviews import build_review_view
+from app.services.reviews import actionable_review_count, actionable_review_items, build_review_view
 from app.services.transaction_details import event_transaction_views
 from app.services.transaction_review import (
     apply_transaction_decision,
@@ -81,8 +80,16 @@ router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
 
 
-def render(request: Request, template: str, **context: object) -> HTMLResponse:
+def render(
+    request: Request,
+    template: str,
+    *,
+    db: Session | None = None,
+    **context: object,
+) -> HTMLResponse:
     settings = get_settings()
+    if db is not None and "open_reviews" not in context:
+        context["open_reviews"] = actionable_review_count(db)
     return templates.TemplateResponse(
         request,
         template,
@@ -98,15 +105,37 @@ def render(request: Request, template: str, **context: object) -> HTMLResponse:
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: DbSession) -> HTMLResponse:
     return render(
-        request, "dashboard.html", active="dashboard", page_title="Übersicht", **build_dashboard(db)
+        request, "dashboard.html", db=db, active="dashboard", page_title="Übersicht", **build_dashboard(db)
     )
 
 
 @router.get("/transactions", response_class=HTMLResponse)
 def transactions(request: Request, db: DbSession) -> HTMLResponse:
+    params = request.query_params
+    event_type = params.get("type", "").strip()
+    if event_type and event_type not in {"expense", "income", "transfer", "refund"}:
+        raise HTTPException(status_code=422, detail="Invalid transaction type filter")
+
+    def optional_int(name: str) -> int | None:
+        value = params.get(name)
+        if not value:
+            return None
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid {name} filter") from exc
+
+    account_id = optional_int("account")
+    category_id = optional_int("category")
+    project_id = optional_int("project")
+    date_from = params.get("date_from")
+    date_to = params.get("date_to")
+    merchant = params.get("merchant", "").strip().casefold()
+
     events = list(
         db.scalars(
             select(EconomicEvent)
+            .where(EconomicEvent.status.in_(("booked", "confirmed")))
             .options(
                 selectinload(EconomicEvent.account),
                 selectinload(EconomicEvent.source_account),
@@ -118,12 +147,54 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
             .order_by(EconomicEvent.occurred_at.desc())
         )
     )
+    views = event_transaction_views(db, events)
+    if event_type:
+        views = [row for row in views if row.event.event_type == event_type]
+    if account_id is not None:
+        views = [
+            row
+            for row in views
+            if account_id
+            in {
+                row.event.account_id,
+                row.event.source_account_id,
+                row.event.target_account_id,
+            }
+        ]
+    if category_id is not None:
+        views = [row for row in views if row.event.category_id == category_id]
+    if project_id is not None:
+        views = [row for row in views if row.event.project_id == project_id]
+    if date_from:
+        views = [
+            row for row in views if row.event.occurred_at.date().isoformat() >= date_from
+        ]
+    if date_to:
+        views = [
+            row for row in views if row.event.occurred_at.date().isoformat() <= date_to
+        ]
+    if merchant:
+        views = [
+            row
+            for row in views
+            if merchant in row.detail.raw_counterparty.casefold()
+            or merchant in row.detail.canonical_merchant.casefold()
+            or merchant in row.detail.secondary_detail.casefold()
+        ]
+
     return render(
         request,
         "transactions.html",
+        db=db,
         active="transactions",
         page_title="Transaktionen",
-        transaction_views=event_transaction_views(db, events),
+        transaction_views=views,
+        filters=params,
+        accounts=list(db.scalars(select(Account).where(Account.is_active).order_by(Account.name))),
+        projects=list(
+            db.scalars(select(Project).where(Project.status == "active").order_by(Project.name))
+        ),
+        category_selector_groups=category_selector_groups(db),
     )
 
 
@@ -131,7 +202,7 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
 def envelopes(request: Request, db: DbSession) -> HTMLResponse:
     data = build_dashboard(db)
     data["assignment_progress"] = build_assignment_workspace(db).progress
-    return render(request, "envelopes.html", active="envelopes", page_title="Umschläge", **data)
+    return render(request, "envelopes.html", db=db, active="envelopes", page_title="Umschläge", **data)
 
 
 @router.get("/envelope-assignments", response_class=HTMLResponse)
@@ -166,6 +237,7 @@ def envelope_assignments(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "envelope_assignments.html",
+        db=db,
         active="envelope_assignment",
         page_title="Umschlag-Zuordnung",
         workspace=workspace,
@@ -310,6 +382,7 @@ def accounts(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "accounts.html",
+        db=db,
         active="accounts",
         page_title="Konten",
         accounts=account_balance_views(db),
@@ -343,6 +416,7 @@ def confirm_account_balance(request: Request, account_id: int, db: DbSession) ->
     return render(
         request,
         "account_confirmation.html",
+        db=db,
         active="accounts",
         page_title="Saldo bestätigen",
         **_confirmation_context(account, db),
@@ -390,6 +464,7 @@ def save_account_balance(
         response = render(
             request,
             "account_confirmation.html",
+            db=db,
             active="accounts",
             page_title="Saldo bestätigen",
             error=str(exc),
@@ -401,14 +476,20 @@ def save_account_balance(
 
 
 @router.get("/planning", response_class=HTMLResponse)
-def planning(request: Request) -> HTMLResponse:
+def planning(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "placeholder.html",
+        db=db,
         active="planning",
         page_title="Planung",
         section="Liquiditätsplanung",
-        description="6–8-Wochen-Prognose, wiederkehrende Kosten und geplante Umschlagzuführungen.",
+        description=(
+            "Das Planungsdatenmodell ist vorhanden, eine belastbare 6–8-Wochen-Prognose "
+            "ist aber noch nicht produktiv. Die Übersicht zeigt deshalb nur tatsächlich "
+            "gespeicherte wiederkehrende Positionen."
+        ),
+        status_label="Noch nicht produktiv",
     )
 
 
@@ -418,29 +499,38 @@ def projects(request: Request, db: DbSession) -> HTMLResponse:
     project_stats = {
         project.id: {
             "count": db.scalar(
-                select(func.count(EconomicEvent.id)).where(EconomicEvent.project_id == project.id)
+                select(func.count(EconomicEvent.id)).where(
+                    EconomicEvent.project_id == project.id,
+                    EconomicEvent.status.in_(("booked", "confirmed")),
+                )
             )
             or 0,
             "expenses": db.scalar(
                 select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
-                    EconomicEvent.project_id == project.id, EconomicEvent.event_type == "expense"
+                    EconomicEvent.project_id == project.id,
+                    EconomicEvent.event_type == "expense",
+                    EconomicEvent.status.in_(("booked", "confirmed")),
                 )
             )
             or 0,
             "refunds": db.scalar(
                 select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
-                    EconomicEvent.project_id == project.id, EconomicEvent.event_type == "refund"
+                    EconomicEvent.project_id == project.id,
+                    EconomicEvent.event_type == "refund",
+                    EconomicEvent.status.in_(("booked", "confirmed")),
                 )
             )
             or 0,
             "first": db.scalar(
                 select(func.min(EconomicEvent.occurred_at)).where(
-                    EconomicEvent.project_id == project.id
+                    EconomicEvent.project_id == project.id,
+                    EconomicEvent.status.in_(("booked", "confirmed")),
                 )
             ),
             "last": db.scalar(
                 select(func.max(EconomicEvent.occurred_at)).where(
-                    EconomicEvent.project_id == project.id
+                    EconomicEvent.project_id == project.id,
+                    EconomicEvent.status.in_(("booked", "confirmed")),
                 )
             ),
         }
@@ -449,6 +539,7 @@ def projects(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "projects.html",
+        db=db,
         active="projects",
         page_title="Projekte",
         projects=rows,
@@ -518,6 +609,7 @@ def transaction_review(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "transaction_review.html",
+        db=db,
         active="transaction_review",
         page_title="Transaktionsprüfung",
         rows=rows,
@@ -673,6 +765,7 @@ def categories(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "categories.html",
+        db=db,
         active="categories",
         page_title="Kategorien",
         category_groups=category_groups(db),
@@ -733,21 +826,7 @@ def category_status_route(
 
 @router.get("/review", response_class=HTMLResponse)
 def review(request: Request, db: DbSession) -> HTMLResponse:
-    rows = list(
-        db.scalars(
-            select(ReviewItem)
-            .options(
-                selectinload(ReviewItem.economic_event),
-                selectinload(ReviewItem.proposed_category),
-                selectinload(ReviewItem.proposed_envelope),
-                selectinload(ReviewItem.proposed_project),
-                selectinload(ReviewItem.source_transaction)
-                .selectinload(SourceTransaction.account_links)
-                .selectinload(SourceTransactionAccount.account),
-            )
-            .order_by(ReviewItem.status, ReviewItem.id)
-        )
-    )
+    rows = actionable_review_items(db)
     raw_ids = {
         row.source_transaction.raw_record_id
         for row in rows
@@ -760,6 +839,7 @@ def review(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "review.html",
+        db=db,
         active="review",
         page_title="Prüfen",
         reviews=[
@@ -771,6 +851,7 @@ def review(request: Request, db: DbSession) -> HTMLResponse:
             )
             for row in rows
         ],
+        open_reviews=len(rows),
         category_selector_groups=category_selector_groups(db),
         envelopes=list(
             db.scalars(select(Envelope).where(Envelope.is_active).order_by(Envelope.sort_order))
@@ -793,6 +874,7 @@ def imports(
     return render(
         request,
         "import.html",
+        db=db,
         active="import",
         page_title="Import",
         batches=batches,
@@ -843,6 +925,7 @@ def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
         return render(
             request,
             "amazon_preview.html",
+            db=db,
             active="import",
             page_title="Amazon-Enrichment-Vorschau",
             batch=batch,
@@ -858,6 +941,7 @@ def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
         return render(
             request,
             "amex_preview.html",
+            db=db,
             active="import",
             page_title="American-Express-Vorschau",
             batch=batch,
@@ -873,6 +957,7 @@ def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
         return render(
             request,
             "paypal_preview.html",
+            db=db,
             active="import",
             page_title="PayPal-Vorschau",
             batch=batch,
@@ -887,6 +972,7 @@ def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
     return render(
         request,
         "sparda_preview.html",
+        db=db,
         active="import",
         page_title="Sparda-Vorschau",
         batch=batch,
@@ -934,6 +1020,7 @@ def diagnostics(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "diagnostics.html",
+        db=db,
         active="settings",
         page_title="Diagnose",
         checks=run_diagnostics(db, get_settings()),
@@ -941,15 +1028,18 @@ def diagnostics(request: Request, db: DbSession) -> HTMLResponse:
 
 
 @router.get("/settings", response_class=HTMLResponse)
-def settings(request: Request) -> HTMLResponse:
+def settings(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "placeholder.html",
+        db=db,
         active="settings",
         page_title="Einstellungen",
         section="Lokale Einstellungen",
         description=(
-            "Datenbank, Importprofile, Regeln und Darstellungsoptionen – "
-            "standardmäßig vollständig lokal."
+            "Diagnose und produktive Laufzeitkonfiguration sind vorhanden. Eine sichere "
+            "UI zum Ändern von Datenbank-, Importprofil- und Darstellungsoptionen ist noch "
+            "nicht produktiv; diese Einstellungen bleiben derzeit konfigurationsbasiert."
         ),
+        status_label="Noch nicht produktiv",
     )

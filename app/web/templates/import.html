@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="intro"><div><h2>Datei sicher bereitstellen</h2><p>Die Originaldatei wird unverändert lokal gespeichert und vor jedem späteren Parserlauf geprüft.</p></div></div>
-{% if not private_import_enabled %}<div class="notice">Demo-Profil aktiv: Dateien können geprüft werden, produktive Sparda-Importe sind jedoch gesperrt. Private Daten müssen im getrennten Privat-Profil importiert werden.</div>{% endif %}
+{% if not private_import_enabled %}<div class="notice">Demo-Profil aktiv: Dateien können geprüft werden, produktive Importe sind jedoch gesperrt. Private Daten müssen im getrennten Privat-Profil importiert werden.</div>{% endif %}
 {% if duplicate %}<div class="notice">Diese Datei war bereits vorhanden. Es wurde kein zweiter Import-Batch angelegt.</div>{% endif %}
 {% if selected_batch and (selected_batch.metadata_json or {}).get('import_summary') %}
 {% set result = selected_batch.metadata_json.import_summary %}
@@ -25,7 +25,7 @@
     <button class="primary-button" type="submit">Prüfen und bereitstellen</button>
   </form>
 </article>
-<article class="panel import-flow"><h3>Sicherer Ablauf</h3><ol><li>Upload</li><li>Hash</li><li>Validierung</li><li>Quarantäne</li><li>Duplikatprüfung</li><li>Später: Parser</li><li>Atomarer Import</li></ol></article>
+<article class="panel import-flow"><h3>Sicherer Ablauf</h3><ol><li>Upload</li><li>Hash</li><li>Validierung</li><li>Quarantäne</li><li>Duplikatprüfung</li><li>Parser + Vorschau</li><li>Atomarer Import</li></ol></article>
 <div class="section-head"><div><h2>Import-Status</h2><p>Keine Dateinamen, Beschreibungen oder Rohdaten werden hier angezeigt.</p></div></div>
 <article class="panel table-panel"><table><thead><tr><th>Batch</th><th>Quelle</th><th>Status</th><th>Größe</th><th>Aktuelles Ergebnis</th><th>Historie</th></tr></thead><tbody>
 {% for batch in batches %}

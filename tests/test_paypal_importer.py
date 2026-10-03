@@ -151,6 +151,33 @@ def _import(
         return db.get(ImportBatch, batch.id)
 
 
+def test_embedded_quotes_and_commas_parse_after_sniffer_sample(tmp_path: Path) -> None:
+    rows = [
+        _row(**{"Transaktionscode": f"SYN-FILL-{index}"})
+        for index in range(100)
+    ]
+    item_name = (
+        'Eukalyptus "Gunni" gruen, Olivenzweige im Bund, '
+        'Blumenmesser "Blumigo" violett'
+    )
+    rows.append(
+        _row(
+            **{
+                "Transaktionscode": "SYN-QUOTED-ITEM",
+                "Artikelbezeichnung": item_name,
+            }
+        )
+    )
+    path = tmp_path / "paypal-quotes.csv"
+    path.write_bytes(_csv_bytes(rows))
+
+    parsed = parse_paypal_csv(path)
+
+    assert len(parsed) == 101
+    assert parsed[-1].transaction_code == "SYN-QUOTED-ITEM"
+    assert parsed[-1].item_name == item_name
+
+
 def test_utf8_bom_decimal_flexible_columns_and_required_validation(tmp_path: Path) -> None:
     columns = tuple(reversed(PAYPAL_COLUMNS))
     path = tmp_path / "paypal.csv"

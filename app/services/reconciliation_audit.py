@@ -69,7 +69,8 @@ def _existing_event_for_source(
     preferred = [
         link
         for link in links
-        if link.link_type in {"canonical_source", "funding_leg", "third_party_payment", "settlement_leg"}
+        if link.link_type
+        in {"canonical_source", "funding_leg", "third_party_payment", "settlement_leg"}
     ]
     return preferred[0].economic_event_id if preferred else None
 
@@ -112,7 +113,6 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
     for link in links:
         links_by_source[link.source_transaction_id].append(link)
 
-    events_by_id = {event.id: event for event in events}
     candidates: list[ReconciliationCandidate] = []
 
     existing_cross_source_links = sum(
@@ -164,9 +164,14 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
             for candidate in external
             if candidate.currency == source.currency
             and _same_amount(candidate.amount, source.amount)
-            and _days(candidate.booked_at, source.booked_at) <= (3 if target_system == "amex" else 4)
+            and _days(candidate.booked_at, source.booked_at)
+            <= (3 if target_system == "amex" else 4)
         ]
-        close = [candidate for candidate in matches if _days(candidate.booked_at, source.booked_at) <= 1]
+        close = [
+            candidate
+            for candidate in matches
+            if _days(candidate.booked_at, source.booked_at) <= 1
+        ]
 
         if len(close) == 1:
             candidates.append(
@@ -178,7 +183,10 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
                     occurred_at=source.booked_at,
                     source_id=source.id,
                     target_id=close[0].id,
-                    detail=f"Eindeutiger {target_system.upper()}-Treffer: identischer Betrag, max. 1 Tag Abstand.",
+                    detail=(
+                        f"Eindeutiger {target_system.upper()}-Treffer: identischer Betrag, "
+                        "max. 1 Tag Abstand."
+                    ),
                 )
             )
         elif len(matches) == 1:
@@ -191,7 +199,10 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
                     occurred_at=source.booked_at,
                     source_id=source.id,
                     target_id=matches[0].id,
-                    detail=f"Ein {target_system.upper()}-Betragskandidat im erweiterten Datumsfenster.",
+                    detail=(
+                        f"Ein {target_system.upper()}-Betragskandidat im erweiterten "
+                        "Datumsfenster."
+                    ),
                 )
             )
         else:
@@ -223,12 +234,17 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
             and _same_amount(candidate.amount, source.amount)
             and _days(candidate.booked_at, source.booked_at) <= 7
             and (
-                "american express" in f"{candidate.merchant_raw or ''} {candidate.description_raw}".casefold()
+                "american express"
+                in f"{candidate.merchant_raw or ''} {candidate.description_raw}".casefold()
                 or (candidate.metadata_json or {}).get("sparda_semantic")
                 in {"amex_settlement", "card_settlement"}
             )
         ]
-        close = [candidate for candidate in matches if _days(candidate.booked_at, source.booked_at) <= 2]
+        close = [
+            candidate
+            for candidate in matches
+            if _days(candidate.booked_at, source.booked_at) <= 2
+        ]
         if len(close) == 1:
             confidence, score, target = "high", Decimal("0.95"), close[0]
         elif len(matches) == 1:
@@ -289,12 +305,18 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
             for link in links:
                 if link.economic_event_id != event.id:
                     continue
-                source = next((item for item in sources if item.id == link.source_transaction_id), None)
+                source = next(
+                    (item for item in sources if item.id == link.source_transaction_id), None
+                )
                 if source:
                     source_systems.add(source.source_system)
 
         if len(matches) == 1:
-            confidence = "high" if len(rows) > 1 or source_systems & {"amex", "paypal", "sparda"} else "medium"
+            confidence = (
+                "high"
+                if len(rows) > 1 or source_systems & {"amex", "paypal", "sparda"}
+                else "medium"
+            )
             score = Decimal("0.94") if confidence == "high" else Decimal("0.75")
             target_id = matches[0].id
         else:
@@ -314,7 +336,10 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
                 detail=(
                     f"Amazon-Gruppe mit {len(rows)} Position(en), Summe {total:.2f} EUR."
                     if matches
-                    else f"Amazon-Gruppe mit {len(rows)} Position(en); {len(matches)} passende Events."
+                    else (
+                        f"Amazon-Gruppe mit {len(rows)} Position(en); "
+                        f"{len(matches)} passende Events."
+                    )
                 ),
             )
         )

@@ -17,8 +17,8 @@ from app.db.models import (
     Category,
     EconomicEvent,
     Envelope,
-    Project,
     EventSourceLink,
+    Project,
     ReviewItem,
     SourceTransaction,
 )
@@ -219,6 +219,94 @@ def test_transaction_page_type_and_account_filters_are_effective(db: Session) ->
     assert paypal_page.status_code == 200
     assert "Nur Einnahme" in paypal_page.text
     assert "Nur Ausgabe" not in paypal_page.text
+
+
+def test_transaction_page_date_merchant_category_and_project_filters(db: Session) -> None:
+    account = Account(name="Giro", account_type="checking", is_active=True)
+    category = Category(name="Reise")
+    project = Project(name="Frankreich 2026", status="active")
+    db.add_all([account, category, project])
+    db.flush()
+    db.add_all(
+        [
+            EconomicEvent(
+                event_type="expense",
+                occurred_at=datetime(2026, 9, 28, 8),
+                description="Boulangerie Le Lavandou",
+                amount=D("18"),
+                account_id=account.id,
+                category_id=category.id,
+                project_id=project.id,
+                status="booked",
+            ),
+            EconomicEvent(
+                event_type="expense",
+                occurred_at=datetime(2026, 8, 1, 8),
+                description="Anderer Händler",
+                amount=D("22"),
+                account_id=account.id,
+                status="booked",
+            ),
+        ]
+    )
+    db.commit()
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            page = client.get(
+                "/transactions",
+                params={
+                    "date_from": "2026-09-01",
+                    "date_to": "2026-09-30",
+                    "merchant": "Boulangerie",
+                    "category": str(category.id),
+                    "project": str(project.id),
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert page.status_code == 200
+    assert "Boulangerie Le Lavandou" in page.text
+    assert "Anderer Händler" not in page.text
+
+
+def test_transfer_page_shows_source_to_target_and_filters_both_accounts(db: Session) -> None:
+    source = Account(name="Giro Quelle", account_type="checking", is_active=True)
+    target = Account(name="PayPal Ziel", account_type="paypal", is_active=True)
+    db.add_all([source, target])
+    db.flush()
+    db.add(
+        EconomicEvent(
+            event_type="transfer",
+            occurred_at=datetime(2026, 10, 1, 8),
+            description="Interner Transfer",
+            amount=D("75"),
+            source_account_id=source.id,
+            target_account_id=target.id,
+            status="booked",
+        )
+    )
+    db.commit()
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            page = client.get(f"/transactions?type=transfer&account={target.id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert page.status_code == 200
+    assert "Giro Quelle" in page.text
+    assert "PayPal Ziel" in page.text
+    assert "→" in page.text
 
 
 def test_transaction_page_hides_non_effective_event_statuses(db: Session) -> None:

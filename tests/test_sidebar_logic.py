@@ -17,6 +17,7 @@ from app.db.models import (
     Category,
     EconomicEvent,
     Envelope,
+    Project,
     EventSourceLink,
     ReviewItem,
     SourceTransaction,
@@ -218,3 +219,113 @@ def test_transaction_page_type_and_account_filters_are_effective(db: Session) ->
     assert paypal_page.status_code == 200
     assert "Nur Einnahme" in paypal_page.text
     assert "Nur Ausgabe" not in paypal_page.text
+
+
+def test_transaction_page_hides_non_effective_event_statuses(db: Session) -> None:
+    db.add_all(
+        [
+            EconomicEvent(
+                event_type="expense",
+                occurred_at=datetime(2026, 10, 1, 8),
+                description="Wirksame Ausgabe",
+                amount=D("10"),
+                status="booked",
+            ),
+            EconomicEvent(
+                event_type="expense",
+                occurred_at=datetime(2026, 10, 2, 8),
+                description="Nicht wirksamer Entwurf",
+                amount=D("999"),
+                status="draft",
+            ),
+        ]
+    )
+    db.commit()
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            page = client.get("/transactions")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert page.status_code == 200
+    assert "Wirksame Ausgabe" in page.text
+    assert "Nicht wirksamer Entwurf" not in page.text
+
+
+def test_project_totals_use_only_effective_economic_events(db: Session) -> None:
+    project = Project(name="Sidebar-Audit-Projekt", status="active")
+    db.add(project)
+    db.flush()
+    db.add_all(
+        [
+            EconomicEvent(
+                event_type="expense",
+                occurred_at=datetime(2026, 10, 1, 8),
+                description="Gebuchte Projektausgabe",
+                amount=D("40"),
+                project_id=project.id,
+                status="booked",
+            ),
+            EconomicEvent(
+                event_type="refund",
+                occurred_at=datetime(2026, 10, 2, 8),
+                description="Gebuchter Projektrefund",
+                amount=D("10"),
+                project_id=project.id,
+                status="confirmed",
+            ),
+            EconomicEvent(
+                event_type="expense",
+                occurred_at=datetime(2026, 10, 3, 8),
+                description="Nicht wirksamer Projektentwurf",
+                amount=D("999"),
+                project_id=project.id,
+                status="draft",
+            ),
+        ]
+    )
+    db.commit()
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            page = client.get("/projects")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert page.status_code == 200
+    assert "3 Vorgänge" not in page.text
+    assert "2 Vorgänge" in page.text
+    assert "40,00" in page.text
+    assert "10,00" in page.text
+    assert "999,00" not in page.text
+
+
+def test_category_page_labels_pending_counts_as_source_decisions(db: Session) -> None:
+    parent = Category(name="Wohnen")
+    db.add(parent)
+    db.flush()
+    db.add(Category(name="Haushalt", parent_id=parent.id))
+    db.commit()
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            page = client.get("/categories")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert page.status_code == 200
+    assert "Quellentscheidungen ohne Ereignis" in page.text
+    assert "offene Review-Entscheidungen" not in page.text

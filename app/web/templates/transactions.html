@@ -1,6 +1,82 @@
-{% extends "base.html" %}{% block content %}
-<div class="toolbar"><div class="filter-group"><button class="filter active">Alle</button><button class="filter">Ausgaben</button><button class="filter">Einnahmen</button><button class="filter">Transfers</button><button class="filter">Refunds</button></div><button class="secondary-button">Filter</button></div>
-<article class="panel table-panel"><table><thead><tr><th>Datum</th><th>Händler / Empfänger</th><th>Betrag</th><th>Konto</th><th>Kategorie</th><th>Umschlag</th><th>Projekt / Tag</th><th>Status</th></tr></thead><tbody>
-{% for row in transaction_views %}{% set event = row.event %}<tr><td>{{ event.occurred_at.strftime('%d.%m.%Y') }}</td><td><strong>{{ row.detail.raw_counterparty }}</strong>{% if row.detail.secondary_detail %}<br><small class="transaction-detail">{{ row.detail.secondary_detail }}</small>{% endif %}{% if event.event_type == 'transfer' %}<br><span class="merchant-hint">{{ (event.source_account.name if event.source_account else (event.account.name if event.account else 'Quelle offen'))|account_label }} → {{ (event.target_account.name if event.target_account else 'Ziel offen')|account_label }}</span>{% elif row.detail.canonical_merchant != row.detail.raw_counterparty %}<br><span class="merchant-hint" title="{{ row.detail.canonical_reason }}">Erkannt: {{ row.detail.canonical_merchant }}</span>{% endif %}</td><td class="amount {% if event.event_type == 'expense' %}red{% elif event.event_type == 'transfer' %}{% else %}green{% endif %}">{{ '-' if event.event_type == 'expense' else ('+' if event.event_type in ['income','refund'] else '') }}{{ event.amount|euro }}</td><td>{{ event.account.name if event.account else '—' }}</td><td>{{ event.category.name if event.category else 'Offen' }}</td><td>{{ event.envelope.name if event.envelope else '—' }}</td><td>{{ event.project.name if event.project else '—' }}</td><td><span class="badge {% if event.status == 'booked' %}success{% else %}neutral{% endif %}">{{ event.status }}</span></td></tr>{% endfor %}
-</tbody></table></article>
+{% extends "base.html" %}
+{% from "_category_picker.html" import category_picker %}
+{% block content %}
+<div class="toolbar">
+  <div class="filter-group">
+    <a class="filter {% if not filters.get('event_type') %}active{% endif %}" href="/transactions">Alle</a>
+    <a class="filter {% if filters.get('event_type') == 'expense' %}active{% endif %}" href="/transactions?event_type=expense">Ausgaben</a>
+    <a class="filter {% if filters.get('event_type') == 'income' %}active{% endif %}" href="/transactions?event_type=income">Einnahmen</a>
+    <a class="filter {% if filters.get('event_type') == 'transfer' %}active{% endif %}" href="/transactions?event_type=transfer">Transfers</a>
+    <a class="filter {% if filters.get('event_type') == 'refund' %}active{% endif %}" href="/transactions?event_type=refund">Refunds</a>
+  </div>
+  <details class="filter-panel">
+    <summary class="secondary-button">Filter</summary>
+    <form method="get" action="/transactions" class="upload-form">
+      <label>Typ
+        <select name="event_type">
+          <option value="">Alle</option>
+          <option value="expense" {% if filters.get('event_type') == 'expense' %}selected{% endif %}>Ausgabe</option>
+          <option value="income" {% if filters.get('event_type') == 'income' %}selected{% endif %}>Einnahme</option>
+          <option value="transfer" {% if filters.get('event_type') == 'transfer' %}selected{% endif %}>Transfer</option>
+          <option value="refund" {% if filters.get('event_type') == 'refund' %}selected{% endif %}>Refund</option>
+        </select>
+      </label>
+      <label>Monat <input type="month" name="month" value="{{ filters.get('month', '') }}"></label>
+      <label>Von <input type="date" name="date_from" value="{{ filters.get('date_from', '') }}"></label>
+      <label>Bis <input type="date" name="date_to" value="{{ filters.get('date_to', '') }}"></label>
+      <label>Händler / Text <input type="search" name="merchant" value="{{ filters.get('merchant', '') }}" placeholder="Suchbegriff"></label>
+      <label>Konto
+        <select name="account">
+          <option value="">Alle</option>
+          {% for item in accounts %}<option value="{{ item.id }}" {% if filters.get('account') == item.id|string %}selected{% endif %}>{{ item.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Kategorie {{ category_picker(category_selector_groups, 'category', 'transaction-category-filter', 'Alle', filters.get('category', ''), 'Kategoriefilter') }}</label>
+      <label>Umschlag
+        <select name="envelope">
+          <option value="">Alle</option>
+          {% for item in envelopes %}<option value="{{ item.id }}" {% if filters.get('envelope') == item.id|string %}selected{% endif %}>{{ item.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Projekt
+        <select name="project">
+          <option value="">Alle</option>
+          {% for item in projects %}<option value="{{ item.id }}" {% if filters.get('project') == item.id|string %}selected{% endif %}>{{ item.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <button class="primary-button" type="submit">Anwenden</button>
+      <a class="text-button" href="/transactions">Zurücksetzen</a>
+    </form>
+  </details>
+</div>
+
+<article class="panel table-panel">
+  <table>
+    <thead><tr><th>Datum</th><th>Händler / Empfänger</th><th>Betrag</th><th>Konto</th><th>Kategorie</th><th>Umschlag</th><th>Projekt / Tag</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for row in transaction_views %}{% set event = row.event %}
+      <tr>
+        <td>{{ event.occurred_at.strftime('%d.%m.%Y') }}</td>
+        <td>
+          <strong>{{ row.detail.raw_counterparty }}</strong>
+          {% if row.detail.secondary_detail %}<br><small class="transaction-detail">{{ row.detail.secondary_detail }}</small>{% endif %}
+          {% if event.event_type == 'transfer' %}
+            <br><span class="merchant-hint">{{ (event.source_account.name if event.source_account else (event.account.name if event.account else 'Quelle offen'))|account_label }} → {{ (event.target_account.name if event.target_account else 'Ziel offen')|account_label }}</span>
+          {% elif row.detail.canonical_merchant != row.detail.raw_counterparty %}
+            <br><span class="merchant-hint" title="{{ row.detail.canonical_reason }}">Erkannt: {{ row.detail.canonical_merchant }}</span>
+          {% endif %}
+        </td>
+        <td class="amount {% if event.event_type == 'expense' %}red{% elif event.event_type == 'transfer' %}{% else %}green{% endif %}">{{ '-' if event.event_type == 'expense' else ('+' if event.event_type in ['income','refund'] else '') }}{{ event.amount|euro }}</td>
+        <td>{% if event.event_type == 'transfer' %}{{ (event.source_account.name if event.source_account else (event.account.name if event.account else '—'))|account_label }} → {{ (event.target_account.name if event.target_account else '—')|account_label }}{% else %}{{ event.account.name if event.account else '—' }}{% endif %}</td>
+        <td>{{ event.category.name if event.category else ('—' if event.event_type == 'transfer' else 'Offen') }}</td>
+        <td>{{ event.envelope.name if event.envelope else '—' }}</td>
+        <td>{{ event.project.name if event.project else '—' }}</td>
+        <td><span class="badge {% if event.status == 'booked' %}success{% else %}neutral{% endif %}">{{ event.status }}</span></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8">Keine Transaktionen für diesen Filter.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</article>
 {% endblock %}

@@ -15,8 +15,6 @@ from app.db.models import (
     ImportBatch,
     Project,
     RawImportRecord,
-    SourceTransaction,
-    SourceTransactionAccount,
 )
 from app.db.session import get_db
 from app.importers.amazon import (
@@ -105,7 +103,12 @@ def render(
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: DbSession) -> HTMLResponse:
     return render(
-        request, "dashboard.html", db=db, active="dashboard", page_title="Übersicht", **build_dashboard(db)
+        request,
+        "dashboard.html",
+        db=db,
+        active="dashboard",
+        page_title="Übersicht",
+        **build_dashboard(db),
     )
 
 
@@ -128,6 +131,7 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
     account_id = optional_int("account")
     category_id = optional_int("category")
     project_id = optional_int("project")
+
     def optional_date(name: str) -> date | None:
         value = params.get(name)
         if not value:
@@ -209,7 +213,9 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
 def envelopes(request: Request, db: DbSession) -> HTMLResponse:
     data = build_dashboard(db)
     data["assignment_progress"] = build_assignment_workspace(db).progress
-    return render(request, "envelopes.html", db=db, active="envelopes", page_title="Umschläge", **data)
+    return render(
+        request, "envelopes.html", db=db, active="envelopes", page_title="Umschläge", **data
+    )
 
 
 @router.get("/envelope-assignments", response_class=HTMLResponse)

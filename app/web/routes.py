@@ -135,6 +135,7 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
     events = list(
         db.scalars(
             select(EconomicEvent)
+            .where(EconomicEvent.status.in_(("booked", "confirmed")))
             .options(
                 selectinload(EconomicEvent.account),
                 selectinload(EconomicEvent.source_account),
@@ -498,29 +499,38 @@ def projects(request: Request, db: DbSession) -> HTMLResponse:
     project_stats = {
         project.id: {
             "count": db.scalar(
-                select(func.count(EconomicEvent.id)).where(EconomicEvent.project_id == project.id)
+                select(func.count(EconomicEvent.id)).where(
+                    EconomicEvent.project_id == project.id,
+                    EconomicEvent.status.in_(("booked", "confirmed")),
+                )
             )
             or 0,
             "expenses": db.scalar(
                 select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
-                    EconomicEvent.project_id == project.id, EconomicEvent.event_type == "expense"
+                    EconomicEvent.project_id == project.id,
+                    EconomicEvent.event_type == "expense",
+                    EconomicEvent.status.in_(("booked", "confirmed")),
                 )
             )
             or 0,
             "refunds": db.scalar(
                 select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
-                    EconomicEvent.project_id == project.id, EconomicEvent.event_type == "refund"
+                    EconomicEvent.project_id == project.id,
+                    EconomicEvent.event_type == "refund",
+                    EconomicEvent.status.in_(("booked", "confirmed")),
                 )
             )
             or 0,
             "first": db.scalar(
                 select(func.min(EconomicEvent.occurred_at)).where(
-                    EconomicEvent.project_id == project.id
+                    EconomicEvent.project_id == project.id,
+                    EconomicEvent.status.in_(("booked", "confirmed")),
                 )
             ),
             "last": db.scalar(
                 select(func.max(EconomicEvent.occurred_at)).where(
-                    EconomicEvent.project_id == project.id
+                    EconomicEvent.project_id == project.id,
+                    EconomicEvent.status.in_(("booked", "confirmed")),
                 )
             ),
         }

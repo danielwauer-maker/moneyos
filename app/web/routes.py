@@ -128,8 +128,19 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
     account_id = optional_int("account")
     category_id = optional_int("category")
     project_id = optional_int("project")
-    date_from = params.get("date_from")
-    date_to = params.get("date_to")
+    def optional_date(name: str) -> date | None:
+        value = params.get(name)
+        if not value:
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid {name} filter") from exc
+
+    date_from = optional_date("date_from")
+    date_to = optional_date("date_to")
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=422, detail="date_from must not be after date_to")
     merchant = params.get("merchant", "").strip().casefold()
 
     events = list(
@@ -166,13 +177,9 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
     if project_id is not None:
         views = [row for row in views if row.event.project_id == project_id]
     if date_from:
-        views = [
-            row for row in views if row.event.occurred_at.date().isoformat() >= date_from
-        ]
+        views = [row for row in views if row.event.occurred_at.date() >= date_from]
     if date_to:
-        views = [
-            row for row in views if row.event.occurred_at.date().isoformat() <= date_to
-        ]
+        views = [row for row in views if row.event.occurred_at.date() <= date_to]
     if merchant:
         views = [
             row

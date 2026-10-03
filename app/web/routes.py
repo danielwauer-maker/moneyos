@@ -15,7 +15,6 @@ from app.db.models import (
     ImportBatch,
     Project,
     RawImportRecord,
-    ReviewItem,
     SourceTransaction,
     SourceTransactionAccount,
 )
@@ -68,7 +67,7 @@ from app.services.import_staging import (
     is_batch_previewable,
     stage_upload,
 )
-from app.services.reviews import build_review_view
+from app.services.reviews import actionable_review_items, build_review_view
 from app.services.transaction_details import event_transaction_views
 from app.services.transaction_review import (
     apply_transaction_decision,
@@ -104,6 +103,27 @@ def dashboard(request: Request, db: DbSession) -> HTMLResponse:
 
 @router.get("/transactions", response_class=HTMLResponse)
 def transactions(request: Request, db: DbSession) -> HTMLResponse:
+    params = request.query_params
+    event_type = params.get("type", "").strip()
+    if event_type and event_type not in {"expense", "income", "transfer", "refund"}:
+        raise HTTPException(status_code=422, detail="Invalid transaction type filter")
+
+    def optional_int(name: str) -> int | None:
+        value = params.get(name)
+        if not value:
+            return None
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid {name} filter") from exc
+
+    account_id = optional_int("account")
+    category_id = optional_int("category")
+    project_id = optional_int("project")
+    date_from = params.get("date_from")
+    date_to = params.get("date_to")
+    merchant = params.get("merchant", "").strip().casefold()
+
     events = list(
         db.scalars(
             select(EconomicEvent)
@@ -118,12 +138,53 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
             .order_by(EconomicEvent.occurred_at.desc())
         )
     )
+    views = event_transaction_views(db, events)
+    if event_type:
+        views = [row for row in views if row.event.event_type == event_type]
+    if account_id is not None:
+        views = [
+            row
+            for row in views
+            if account_id
+            in {
+                row.event.account_id,
+                row.event.source_account_id,
+                row.event.target_account_id,
+            }
+        ]
+    if category_id is not None:
+        views = [row for row in views if row.event.category_id == category_id]
+    if project_id is not None:
+        views = [row for row in views if row.event.project_id == project_id]
+    if date_from:
+        views = [
+            row for row in views if row.event.occurred_at.date().isoformat() >= date_from
+        ]
+    if date_to:
+        views = [
+            row for row in views if row.event.occurred_at.date().isoformat() <= date_to
+        ]
+    if merchant:
+        views = [
+            row
+            for row in views
+            if merchant in row.detail.raw_counterparty.casefold()
+            or merchant in row.detail.canonical_merchant.casefold()
+            or merchant in row.detail.secondary_detail.casefold()
+        ]
+
     return render(
         request,
         "transactions.html",
         active="transactions",
         page_title="Transaktionen",
-        transaction_views=event_transaction_views(db, events),
+        transaction_views=views,
+        filters=params,
+        accounts=list(db.scalars(select(Account).where(Account.is_active).order_by(Account.name))),
+        projects=list(
+            db.scalars(select(Project).where(Project.status == "active").order_by(Project.name))
+        ),
+        category_selector_groups=category_selector_groups(db),
     )
 
 
@@ -733,21 +794,7 @@ def category_status_route(
 
 @router.get("/review", response_class=HTMLResponse)
 def review(request: Request, db: DbSession) -> HTMLResponse:
-    rows = list(
-        db.scalars(
-            select(ReviewItem)
-            .options(
-                selectinload(ReviewItem.economic_event),
-                selectinload(ReviewItem.proposed_category),
-                selectinload(ReviewItem.proposed_envelope),
-                selectinload(ReviewItem.proposed_project),
-                selectinload(ReviewItem.source_transaction)
-                .selectinload(SourceTransaction.account_links)
-                .selectinload(SourceTransactionAccount.account),
-            )
-            .order_by(ReviewItem.status, ReviewItem.id)
-        )
-    )
+    rows = actionable_review_items(db)
     raw_ids = {
         row.source_transaction.raw_record_id
         for row in rows
@@ -771,6 +818,7 @@ def review(request: Request, db: DbSession) -> HTMLResponse:
             )
             for row in rows
         ],
+        open_reviews=len(rows),
         category_selector_groups=category_selector_groups(db),
         envelopes=list(
             db.scalars(select(Envelope).where(Envelope.is_active).order_by(Envelope.sort_order))

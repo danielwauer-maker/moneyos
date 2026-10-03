@@ -101,9 +101,7 @@ def _amazon_group_ids(
             db.scalars(
                 select(AmazonEnrichmentRecord).where(
                     AmazonEnrichmentRecord.order_key == record.order_key,
-                    AmazonEnrichmentRecord.record_type.in_(
-                        ("order_item", "digital_order_item")
-                    ),
+                    AmazonEnrichmentRecord.record_type.in_(("order_item", "digital_order_item")),
                 )
             )
         )

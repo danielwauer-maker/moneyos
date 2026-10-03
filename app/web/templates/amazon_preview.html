@@ -14,7 +14,7 @@
   <article class="kpi"><span>Gift Card / Split</span><strong>{{ summary.gift_card_split_cases }}</strong><small>Keine erzwungene Vollbetragszuordnung</small></article>
   <article class="kpi"><span>Enrichment-Links</span><strong>{{ summary.enrichment_links_would_create }}</strong><small>Nur bei hoher Sicherheit</small></article>
 </div>
-<article class="panel" style="margin-top:18px"><h3>Importwirkung</h3><p><strong>Neue Transaktionen/Enrichments:</strong> {{ summary.new_rows }} · <strong>Bereits vorhanden – werden übersprungen:</strong> {{ summary.existing_exact_rows }} · <strong>Konflikte – werden nicht automatisch überschrieben:</strong> {{ summary.conflicting_rows }}</p></article>
+<article class="panel" style="margin-top:18px"><h3>Importwirkung</h3><p><strong>Neue Amazon-Enrichments:</strong> {{ summary.new_rows }} · <strong>Bereits vorhanden – werden übersprungen:</strong> {{ summary.existing_exact_rows }} · <strong>Konflikte – werden nicht automatisch überschrieben:</strong> {{ summary.conflicting_rows }}</p></article>
 <article class="panel table-panel" style="margin-top:18px"><table><thead><tr><th>Zeile</th><th>Art</th><th>Datum</th><th>Sichere Beschreibung</th><th>Betrag</th><th>Match</th><th>Kategorievorschlag</th></tr></thead><tbody>
 {% for row in rows %}<tr><td>{{ row.row_number }}</td><td>{{ row.source_kind }}</td><td>{{ row.occurred_at }}</td><td><strong>{{ row.safe_title }}</strong></td><td class="amount">{{ row.amount }}</td><td>{{ row.match_confidence }}</td><td>{{ row.category_suggestion }}</td></tr>{% endfor %}
 </tbody></table></article>

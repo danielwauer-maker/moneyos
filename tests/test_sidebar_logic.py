@@ -25,6 +25,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.main import app
+from app.services.categories import category_groups
 from app.services.dashboard import build_dashboard
 from app.services.envelope_targets import calculate_envelope_targets
 from app.services.reviews import actionable_review_count
@@ -467,3 +468,86 @@ def test_envelope_targets_handles_open_review_rows(db: Session) -> None:
     assert result.unresolved_count == 1
     assert result.rows[0].unresolved_count == 1
     assert result.rows[0].status == "partial"
+
+
+def test_category_counts_exclude_non_effective_events(db: Session) -> None:
+    category = Category(name="Wirksame Kategorie")
+    db.add(category)
+    db.flush()
+    db.add_all(
+        [
+            EconomicEvent(
+                event_type="expense",
+                occurred_at=datetime(2026, 10, 1, 8),
+                description="Gebucht",
+                amount=D("10"),
+                category_id=category.id,
+                status="booked",
+            ),
+            EconomicEvent(
+                event_type="expense",
+                occurred_at=datetime(2026, 10, 2, 8),
+                description="Bestätigt",
+                amount=D("20"),
+                category_id=category.id,
+                status="confirmed",
+            ),
+            EconomicEvent(
+                event_type="expense",
+                occurred_at=datetime(2026, 10, 3, 8),
+                description="Entwurf",
+                amount=D("999"),
+                category_id=category.id,
+                status="draft",
+            ),
+        ]
+    )
+    db.commit()
+
+    groups = category_groups(db)
+
+    assert groups[0].parent.event_count == 2
+
+
+def test_transaction_page_rejects_invalid_date_filters(db: Session) -> None:
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            invalid = client.get("/transactions?date_from=not-a-date")
+            reversed_range = client.get(
+                "/transactions?date_from=2026-10-31&date_to=2026-10-01"
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert invalid.status_code == 422
+    assert reversed_range.status_code == 422
+
+
+def test_dashboard_labels_all_liabilities_generically(db: Session) -> None:
+    _confirmed_account(
+        db,
+        name="Sonstige Verbindlichkeit",
+        account_type="loan",
+        balance="-123",
+        liability=True,
+    )
+    db.commit()
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        with TestClient(app) as client:
+            page = client.get("/")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert page.status_code == 200
+    assert "Verbindlichkeiten" in page.text
+    assert "Bestätigte Verbindlichkeitskonten" in page.text
+    assert "Kartenverbindlichkeiten" not in page.text

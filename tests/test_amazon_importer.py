@@ -260,6 +260,30 @@ def test_same_file_twice_is_file_duplicate_and_writes_nothing(
     assert before == after == 1
 
 
+def test_oversized_amazon_quarantine_can_retry_after_limit_change(
+    amazon_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = amazon_store
+    content = _zip_bytes([_order(1)])
+    settings.max_amazon_import_file_size_bytes = len(content) - 1
+    first = _stage(settings, factory, content)
+    assert first.status == "quarantined"
+    assert first.validation_json["issues"][0]["code"] == "file_too_large"
+    first_validation = first.validation_json
+    settings.max_amazon_import_file_size_bytes = len(content) + 1
+
+    retry = _stage(settings, factory, content, "retry.zip")
+
+    assert retry.id != first.id
+    assert retry.status == "valid"
+    with factory() as db:
+        historical = db.get(ImportBatch, first.id)
+        assert historical.status == "quarantined"
+        assert historical.validation_json == first_validation
+        assert db.scalar(select(func.count()).select_from(AmazonEnrichmentRecord)) == 0
+        assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 0
+
+
 def test_eighty_percent_overlap_inserts_only_new_row(
     amazon_store: tuple[Settings, sessionmaker[Session]],
 ) -> None:
@@ -491,12 +515,25 @@ def test_failed_import_rolls_back_and_retries_atomically(
     with factory() as db:
         assert db.scalar(select(func.count()).select_from(RawImportRecord)) == 0
         assert db.get(ImportBatch, batch.id).status == "failed"
+        retry = stage_upload(
+            db,
+            source_type="amazon",
+            original_filename="retry.zip",
+            stream=io.BytesIO(_zip_bytes([_order(1)])),
+            settings=settings,
+        )
+        assert retry.batch.id != batch.id
+        assert retry.batch.status == "valid"
+        retry_batch_id = retry.batch.id
 
     monkeypatch.setattr(amazon, "_import_rows", real_import)
-    import_amazon_batch(factory, batch.id, settings)
+    import_amazon_batch(factory, retry_batch_id, settings)
     with factory() as db:
         assert db.scalar(select(func.count()).select_from(AmazonEnrichmentRecord)) == 1
-        assert db.get(ImportBatch, batch.id).status == "imported"
+        assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 0
+        assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 0
+        assert db.get(ImportBatch, batch.id).status == "failed"
+        assert db.get(ImportBatch, retry_batch_id).status == "imported"
 
 
 def test_stage_preview_ui_is_enrichment_only(

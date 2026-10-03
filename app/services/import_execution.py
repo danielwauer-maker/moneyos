@@ -4,6 +4,7 @@ import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import Settings
@@ -11,6 +12,10 @@ from app.db.models import ImportBatch, utc_now
 from app.services.import_staging import batch_file_path
 
 ImportCallback = Callable[[Session, ImportBatch, Path], int | None]
+
+
+class AlreadyImportedFileError(ValueError):
+    pass
 
 
 def _sha256(path: Path) -> str:
@@ -83,6 +88,17 @@ def run_atomic_import(
             batch = db.get(ImportBatch, batch_id)
             if batch is None or batch.status not in {"valid", "failed"}:
                 raise ValueError("Only a valid or failed batch can be imported")
+            completed_batch_id = db.scalar(
+                select(ImportBatch.id).where(
+                    ImportBatch.source_hash == batch.source_hash,
+                    ImportBatch.status == "imported",
+                    ImportBatch.id != batch.id,
+                )
+            )
+            if completed_batch_id is not None:
+                raise AlreadyImportedFileError(
+                    "This file has already been imported by another batch"
+                )
             path = batch_file_path(batch, settings)
             if _sha256(path) != batch.source_hash:
                 raise ValueError("The staged original no longer matches its recorded hash")
@@ -93,6 +109,8 @@ def run_atomic_import(
             repair_imported_batch_lifecycle(batch)
             batch.imported_at = utc_now()
             batch.updated_at = utc_now()
+    except AlreadyImportedFileError:
+        raise
     except Exception:
         with session_factory() as diagnostics_db, diagnostics_db.begin():
             batch = diagnostics_db.get(ImportBatch, batch_id)

@@ -108,12 +108,27 @@ class BalanceConfirmation(Base):
 
 class ImportBatch(Base):
     __tablename__ = "import_batches"
+    __table_args__ = (
+        Index(
+            "uq_import_batches_imported_hash",
+            "source_hash",
+            unique=True,
+            sqlite_where=text("status = 'imported'"),
+        ),
+        Index(
+            "uq_import_batches_active_hash_source",
+            "source_hash",
+            "source_type",
+            unique=True,
+            sqlite_where=text("status IN ('pending','uploaded','validating','valid')"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_type: Mapped[str] = mapped_column(String(30))
     filename: Mapped[str] = mapped_column(String(255))
     imported_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
-    source_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    source_hash: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(30), default="uploaded")
     row_count: Mapped[int] = mapped_column(Integer, default=0)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

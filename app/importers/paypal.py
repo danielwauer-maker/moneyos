@@ -32,6 +32,7 @@ from app.services.import_identity import (
     SourceIdentityTracker,
     add_source_conflict,
 )
+from app.services.import_staging import preferred_batch_for_source_hash
 
 REQUIRED_COLUMNS = frozenset(
     {
@@ -555,7 +556,7 @@ def dry_run_paypal_file(path: Path, db: Session) -> PayPalDryRunReport:
     summary = _summary(rows, matches)
     _apply_identity_summary(summary, rows, db)
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-    existing_batch = db.scalar(select(ImportBatch).where(ImportBatch.source_hash == source_hash))
+    existing_batch = preferred_batch_for_source_hash(db, source_hash)
     duplicate_file = existing_batch is not None and existing_batch.status == "imported"
     dates = [row.occurred_at.date() for row in rows]
     return PayPalDryRunReport(

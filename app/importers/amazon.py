@@ -31,6 +31,7 @@ from app.importers.sparda import PrivateProfileRequiredError
 from app.security.redaction import redact_text
 from app.services.import_execution import run_atomic_import
 from app.services.import_identity import differing_field_names
+from app.services.import_staging import preferred_batch_for_source_hash
 
 RELEVANT_FILES = {
     "Your Amazon Orders/Order History.csv": "order_item",
@@ -759,7 +760,7 @@ def dry_run_amazon_file(
 ) -> dict[str, object]:
     analysis = analyze_amazon_export(path, db, scope_start)
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-    batch = db.scalar(select(ImportBatch).where(ImportBatch.source_hash == source_hash))
+    batch = preferred_batch_for_source_hash(db, source_hash)
     return {
         **analysis.summary.as_dict(),
         "duplicate_file": bool(batch and batch.status == "imported"),

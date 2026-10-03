@@ -528,17 +528,18 @@ def test_failed_batch_can_retry_without_partial_or_duplicate_records(
             settings=settings,
         )
         assert resumed.duplicate is False
-        assert resumed.batch.id == batch.id
-        assert resumed.batch.status == "failed"
+        assert resumed.batch.id != batch.id
+        assert resumed.batch.status == "valid"
+        retry_batch_id = resumed.batch.id
+        assert failed_batch.status == "failed"
     monkeypatch.setattr(paypal, "_import_rows", original)
-    import_paypal_batch(factory, batch.id, settings)
+    import_paypal_batch(factory, retry_batch_id, settings)
 
     with factory() as db:
-        imported_batch = db.get(ImportBatch, batch.id)
+        imported_batch = db.get(ImportBatch, retry_batch_id)
         assert imported_batch.status == "imported"
         assert imported_batch.validation_json == {"issues": [], "result": "imported"}
-        assert len(imported_batch.metadata_json["attempt_history"]) == 1
-        assert imported_batch.metadata_json["attempt_history"][0]["status"] == "failed"
+        assert db.get(ImportBatch, batch.id).status == "failed"
         assert db.scalar(select(func.count()).select_from(RawImportRecord)) == 1
         assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 1
         assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 1
@@ -551,14 +552,14 @@ def test_failed_batch_can_retry_without_partial_or_duplicate_records(
     app.dependency_overrides[get_db] = override_db
     try:
         with TestClient(app) as client:
-            page = client.get(f"/import?batch_id={batch.id}")
+            page = client.get(f"/import?batch_id={retry_batch_id}")
             assert page.status_code == 200
             assert "Import erfolgreich" in page.text
             assert "Historische Fehler: 1" in page.text
-            assert "import_failed" not in page.text
+            assert "import_failed" in page.text
     finally:
         app.dependency_overrides.clear()
-    with pytest.raises(ValueError, match="valid or failed"):
+    with pytest.raises(ValueError, match="already been imported"):
         import_paypal_batch(factory, batch.id, settings)
     with factory() as db:
         assert db.scalar(select(func.count()).select_from(RawImportRecord)) == 1

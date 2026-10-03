@@ -42,6 +42,24 @@ class StageResult:
     duplicate: bool = False
 
 
+def batches_for_source_hash(db: Session, source_hash: str) -> list[ImportBatch]:
+    return list(
+        db.scalars(
+            select(ImportBatch)
+            .where(ImportBatch.source_hash == source_hash)
+            .order_by(ImportBatch.id.desc())
+        )
+    )
+
+
+def preferred_batch_for_source_hash(db: Session, source_hash: str) -> ImportBatch | None:
+    batches = batches_for_source_hash(db, source_hash)
+    return next(
+        (batch for batch in batches if batch.status == "imported"),
+        batches[0] if batches else None,
+    )
+
+
 def is_batch_previewable(batch: ImportBatch | None) -> bool:
     """Return whether a productive batch may be parsed for a read-only preview."""
     return bool(
@@ -178,24 +196,38 @@ def stage_upload(
                 size += len(chunk)
                 target.write(chunk)
         source_hash = digest.hexdigest()
-        duplicate = db.scalar(select(ImportBatch).where(ImportBatch.source_hash == source_hash))
-        if duplicate is not None:
-            resumable = duplicate.status in {"valid", "failed"}
+        prior_batches = batches_for_source_hash(db, source_hash)
+        completed = next((batch for batch in prior_batches if batch.status == "imported"), None)
+        if completed is not None:
+            temp_path.unlink(missing_ok=True)
+            return StageResult(batch=completed, duplicate=True)
+
+        reusable = next(
+            (
+                batch
+                for batch in prior_batches
+                if batch.source_type == source_type
+                and batch.status in {"pending", "uploaded", "validating", "valid"}
+            ),
+            None,
+        )
+        if reusable is not None:
             stored_path = (
-                settings.staging_dir / duplicate.stored_filename
-                if duplicate.stored_filename
+                settings.staging_dir / reusable.stored_filename
+                if reusable.stored_filename
                 else None
             )
-            if resumable and stored_path is not None and not stored_path.is_file():
+            if stored_path is not None and not stored_path.is_file():
                 os.replace(temp_path, stored_path)
             else:
                 temp_path.unlink(missing_ok=True)
-            return StageResult(
-                batch=duplicate,
-                duplicate=duplicate.status == "imported" or not resumable,
-            )
+            return StageResult(batch=reusable)
 
-        stored_filename = f"{source_hash}{suffix}"
+        stored_filename = (
+            f"{source_hash}{suffix}"
+            if not prior_batches
+            else f"{source_hash}-{secrets.token_hex(4)}{suffix}"
+        )
         staged_path = settings.staging_dir / stored_filename
         os.replace(temp_path, staged_path)
         batch = ImportBatch(

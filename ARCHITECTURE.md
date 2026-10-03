@@ -119,6 +119,13 @@ Importzustände: `uploaded` → `validating` → `valid` → `imported`; verdäc
 Dateien gehen nach `quarantined`, Parserfehler nach `failed`. Legacy-`pending`
 wird nur für bestehende Phase-1-Daten toleriert.
 
+Die Dateihash-Constraint ist lebenszyklusabhängig: Ein partieller Unique-Index
+schützt erfolgreich `imported`e Hashes global, ein zweiter schützt aktive und
+valide Hashes je Quelle gegen parallele Verarbeitung. Fehlgeschlagene und
+quarantänisierte Batches bleiben historisch unverändert und dürfen nach einer
+Konfigurations- oder Parserkorrektur durch einen neuen Batch mit demselben SHA-256
+erneut validiert werden.
+
 Der produktive Sparda-Adapter liegt in `app/importers/sparda.py`. Dekodierung,
 CSV-Struktur, Datums-/Decimal-Normalisierung und Fingerprints sind dort von der
 fachlichen Klassifikation in `app/domain/sparda.py` getrennt. Der Domainteil ruft

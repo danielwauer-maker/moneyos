@@ -147,6 +147,85 @@ def test_completed_file_is_duplicate_protected(
         assert result.batch.id == first.id
 
 
+def test_failed_file_upload_creates_retry_batch_without_mutating_history(
+    private_store: tuple[Settings, sessionmaker, Path],
+) -> None:
+    settings, factory, _ = private_store
+    content = b"Datum;Betrag\n2026-01-01;12,34\n"
+    first = _stage(factory, settings, content, source_type="bank")
+    with factory.begin() as db:
+        failed = db.get(ImportBatch, first.id)
+        failed.status = "failed"
+        failed.validation_json = {"issues": [{"code": "synthetic_failure"}]}
+
+    with factory() as db:
+        retry = stage_upload(
+            db,
+            source_type="bank",
+            original_filename="retry.csv",
+            stream=io.BytesIO(content),
+            settings=settings,
+        )
+        historical = db.get(ImportBatch, first.id)
+        assert retry.duplicate is False
+        assert retry.batch.id != first.id
+        assert retry.batch.status == "valid"
+        assert historical.status == "failed"
+        assert historical.validation_json == {"issues": [{"code": "synthetic_failure"}]}
+        assert db.scalar(select(func.count()).select_from(ImportBatch)) == 2
+
+
+def test_quarantined_oversized_file_can_stage_after_limit_increase(
+    private_store: tuple[Settings, sessionmaker, Path],
+) -> None:
+    settings, factory, _ = private_store
+    content = b"Datum;Betrag\n2026-01-01;12,34\n" + b" " * 64
+    first = _stage(factory, settings, content, source_type="bank")
+    assert first.status == "quarantined"
+    assert "file_too_large" in _issue_codes(first)
+    original_validation = first.validation_json
+    settings.max_import_file_size_bytes = len(content) + 1
+
+    with factory() as db:
+        retry = stage_upload(
+            db,
+            source_type="bank",
+            original_filename="retry.csv",
+            stream=io.BytesIO(content),
+            settings=settings,
+        )
+        historical = db.get(ImportBatch, first.id)
+        assert retry.duplicate is False
+        assert retry.batch.id != first.id
+        assert retry.batch.status == "valid"
+        assert historical.status == "quarantined"
+        assert historical.validation_json == original_validation
+        assert (settings.quarantine_dir / historical.stored_filename).is_file()
+        assert (settings.staging_dir / retry.batch.stored_filename).is_file()
+
+
+@pytest.mark.parametrize("status", ["uploaded", "validating"])
+def test_inflight_file_upload_reuses_existing_batch(
+    private_store: tuple[Settings, sessionmaker, Path], status: str
+) -> None:
+    settings, factory, _ = private_store
+    content = b"Datum;Betrag\n2026-01-01;12,34\n"
+    first = _stage(factory, settings, content, source_type="bank")
+    with factory.begin() as db:
+        db.get(ImportBatch, first.id).status = status
+    with factory() as db:
+        result = stage_upload(
+            db,
+            source_type="bank",
+            original_filename="same.csv",
+            stream=io.BytesIO(content),
+            settings=settings,
+        )
+        assert result.duplicate is False
+        assert result.batch.id == first.id
+        assert db.scalar(select(func.count()).select_from(ImportBatch)) == 1
+
+
 def test_atomic_import_rolls_back_all_financial_records(
     private_store: tuple[Settings, sessionmaker, Path],
 ) -> None:

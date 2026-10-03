@@ -149,10 +149,13 @@ Diagnose bestehen bleiben. Hash plus eindeutige Source-Fingerprints verhindern
 Datei- und Transaktionsduplikate.
 
 Der Dateihash unterscheidet außerdem den Lebenszyklus: Nur ein Batch mit Status
-`imported` gilt als abgeschlossenes Dateiduplikat. Ein `valid`er oder `failed`er
-Batch bleibt unter derselben Batch-ID vorschau- und ausführbar. Der Retry prüft den
-unveränderten Staging-Hash erneut und läuft wieder vollständig atomar; ein bereits
-abgeschlossener Batch kann dagegen nicht erneut ausgeführt werden.
+`imported` gilt als abgeschlossenes Dateiduplikat. Ein bereits sicher gestagter
+`valid`er Batch wird ohne zweite Dateikopie wiederverwendet. `uploaded` und
+`validating` werden ebenfalls nicht parallel dupliziert. Für `failed` oder
+`quarantined` legt derselbe SHA-256 dagegen einen neuen Retry-Batch mit eigener
+unveränderlicher Dateikopie an; Status, Diagnose und Datei des historischen
+Versuchs bleiben unverändert. Der neue Versuch durchläuft die aktuelle Validierung
+vollständig. Row- und Cross-Batch-Idempotenz schützen weiterhin die Fachdaten.
 
 Fehlgeschlagene Versuche bleiben unter `metadata_json.attempt_history` mit neutralem
 Fehlercode und Zeitpunkt auditierbar. Nach einem erfolgreichen Retry beschreibt

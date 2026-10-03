@@ -103,7 +103,11 @@ def test_migration_reaches_head_with_expected_schema(migrated_engine: object) ->
     assert "amazon_payment_matches" in schema.get_table_names()
     assert "import_conflicts" in schema.get_table_names()
     with migrated_engine.connect() as connection:
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261003_0010"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261003_0011"
+    assert {
+        "uq_import_batches_imported_hash",
+        "uq_import_batches_active_hash_source",
+    }.issubset({index["name"] for index in schema.get_indexes("import_batches")})
 
 
 def test_raw_and_source_records_are_append_only_in_orm_and_database(

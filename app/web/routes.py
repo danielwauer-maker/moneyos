@@ -1,10 +1,10 @@
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from typing import Annotated
 from urllib.parse import parse_qs, urlsplit
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from app.config import get_settings
@@ -68,7 +68,7 @@ from app.services.import_staging import (
     is_batch_previewable,
     stage_upload,
 )
-from app.services.reviews import build_review_view
+from app.services.reviews import actionable_open_reviews, build_review_view
 from app.services.transaction_details import event_transaction_views
 from app.services.transaction_review import (
     apply_transaction_decision,
@@ -104,26 +104,107 @@ def dashboard(request: Request, db: DbSession) -> HTMLResponse:
 
 @router.get("/transactions", response_class=HTMLResponse)
 def transactions(request: Request, db: DbSession) -> HTMLResponse:
-    events = list(
-        db.scalars(
-            select(EconomicEvent)
-            .options(
-                selectinload(EconomicEvent.account),
-                selectinload(EconomicEvent.source_account),
-                selectinload(EconomicEvent.target_account),
-                selectinload(EconomicEvent.category),
-                selectinload(EconomicEvent.envelope),
-                selectinload(EconomicEvent.project),
-            )
-            .order_by(EconomicEvent.occurred_at.desc())
-        )
+    params = request.query_params
+
+    def optional_int(name: str) -> int | None:
+        value = params.get(name)
+        if not value:
+            return None
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Ungültiger Filter: {name}") from exc
+
+    event_type = params.get("event_type")
+    if event_type and event_type not in {"expense", "income", "transfer", "refund"}:
+        raise HTTPException(status_code=422, detail="Ungültiger Transaktionstyp")
+
+    query = select(EconomicEvent).options(
+        selectinload(EconomicEvent.account),
+        selectinload(EconomicEvent.source_account),
+        selectinload(EconomicEvent.target_account),
+        selectinload(EconomicEvent.category),
+        selectinload(EconomicEvent.envelope),
+        selectinload(EconomicEvent.project),
     )
+    if event_type:
+        query = query.where(EconomicEvent.event_type == event_type)
+
+    account_id = optional_int("account")
+    if account_id is not None:
+        query = query.where(
+            or_(
+                EconomicEvent.account_id == account_id,
+                EconomicEvent.source_account_id == account_id,
+                EconomicEvent.target_account_id == account_id,
+            )
+        )
+
+    for param_name, column in (
+        ("category", EconomicEvent.category_id),
+        ("envelope", EconomicEvent.envelope_id),
+        ("project", EconomicEvent.project_id),
+    ):
+        value = optional_int(param_name)
+        if value is not None:
+            query = query.where(column == value)
+
+    month = params.get("month")
+    date_from = params.get("date_from")
+    date_to = params.get("date_to")
+    try:
+        if month:
+            month_start = datetime.strptime(month, "%Y-%m")
+            next_month = (
+                datetime(month_start.year + 1, 1, 1)
+                if month_start.month == 12
+                else datetime(month_start.year, month_start.month + 1, 1)
+            )
+            query = query.where(
+                EconomicEvent.occurred_at >= month_start,
+                EconomicEvent.occurred_at < next_month,
+            )
+        if date_from:
+            query = query.where(
+                EconomicEvent.occurred_at
+                >= datetime.combine(date.fromisoformat(date_from), time.min)
+            )
+        if date_to:
+            query = query.where(
+                EconomicEvent.occurred_at
+                < datetime.combine(date.fromisoformat(date_to) + timedelta(days=1), time.min)
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Ungültiger Datumsfilter") from exc
+
+    events = list(db.scalars(query.order_by(EconomicEvent.occurred_at.desc(), EconomicEvent.id.desc())))
+    transaction_views = event_transaction_views(db, events)
+    merchant = params.get("merchant", "").strip().casefold()
+    if merchant:
+        transaction_views = [
+            row
+            for row in transaction_views
+            if merchant in row.detail.raw_counterparty.casefold()
+            or merchant in row.detail.canonical_merchant.casefold()
+            or merchant in row.detail.secondary_detail.casefold()
+        ]
+
     return render(
         request,
         "transactions.html",
         active="transactions",
         page_title="Transaktionen",
-        transaction_views=event_transaction_views(db, events),
+        transaction_views=transaction_views,
+        filters=params,
+        accounts=list(db.scalars(select(Account).where(Account.is_active).order_by(Account.name))),
+        category_selector_groups=category_selector_groups(db),
+        envelopes=list(
+            db.scalars(select(Envelope).where(Envelope.is_active).order_by(Envelope.sort_order))
+        ),
+        projects=list(
+            db.scalars(select(Project).where(Project.status == "active").order_by(Project.name))
+        ),
+        open_reviews=len(rows),
     )
 
 
@@ -408,7 +489,11 @@ def planning(request: Request) -> HTMLResponse:
         active="planning",
         page_title="Planung",
         section="Liquiditätsplanung",
-        description="6–8-Wochen-Prognose, wiederkehrende Kosten und geplante Umschlagzuführungen.",
+        description=(
+            "Planungsdaten sind bereits im Datenmodell vorgesehen. Eine belastbare "
+            "6–8-Wochen-Prognose ist jedoch noch nicht produktiv implementiert; "
+            "diese Seite zeigt deshalb bewusst keine erfundenen Forecast-Werte."
+        ),
     )
 
 
@@ -733,21 +818,7 @@ def category_status_route(
 
 @router.get("/review", response_class=HTMLResponse)
 def review(request: Request, db: DbSession) -> HTMLResponse:
-    rows = list(
-        db.scalars(
-            select(ReviewItem)
-            .options(
-                selectinload(ReviewItem.economic_event),
-                selectinload(ReviewItem.proposed_category),
-                selectinload(ReviewItem.proposed_envelope),
-                selectinload(ReviewItem.proposed_project),
-                selectinload(ReviewItem.source_transaction)
-                .selectinload(SourceTransaction.account_links)
-                .selectinload(SourceTransactionAccount.account),
-            )
-            .order_by(ReviewItem.status, ReviewItem.id)
-        )
-    )
+    rows = actionable_open_reviews(db)
     raw_ids = {
         row.source_transaction.raw_record_id
         for row in rows
@@ -778,6 +849,7 @@ def review(request: Request, db: DbSession) -> HTMLResponse:
         projects=list(
             db.scalars(select(Project).where(Project.status == "active").order_by(Project.name))
         ),
+        open_reviews=len(rows),
     )
 
 
@@ -949,7 +1021,8 @@ def settings(request: Request) -> HTMLResponse:
         page_title="Einstellungen",
         section="Lokale Einstellungen",
         description=(
-            "Datenbank, Importprofile, Regeln und Darstellungsoptionen – "
-            "standardmäßig vollständig lokal."
+            "Die produktiven Einstellungen werden derzeit noch über lokale "
+            "Konfiguration und Umgebungsvariablen verwaltet. Eine sichere "
+            "Einstellungsoberfläche ist noch nicht produktiv implementiert."
         ),
     )

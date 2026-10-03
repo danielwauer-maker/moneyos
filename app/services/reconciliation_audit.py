@@ -168,9 +168,7 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
             <= (3 if target_system == "amex" else 4)
         ]
         close = [
-            candidate
-            for candidate in matches
-            if _days(candidate.booked_at, source.booked_at) <= 1
+            candidate for candidate in matches if _days(candidate.booked_at, source.booked_at) <= 1
         ]
 
         if len(close) == 1:
@@ -200,8 +198,7 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
                     source_id=source.id,
                     target_id=matches[0].id,
                     detail=(
-                        f"Ein {target_system.upper()}-Betragskandidat im erweiterten "
-                        "Datumsfenster."
+                        f"Ein {target_system.upper()}-Betragskandidat im erweiterten Datumsfenster."
                     ),
                 )
             )
@@ -241,9 +238,7 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
             )
         ]
         close = [
-            candidate
-            for candidate in matches
-            if _days(candidate.booked_at, source.booked_at) <= 2
+            candidate for candidate in matches if _days(candidate.booked_at, source.booked_at) <= 2
         ]
         if len(close) == 1:
             confidence, score, target = "high", Decimal("0.95"), close[0]

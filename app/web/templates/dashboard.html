@@ -5,7 +5,7 @@
   <article class="kpi featured"><span>Gesamtvermögen{% if wealth_has_unknown %} teilweise{% endif %}</span><strong>{{ wealth|euro }}</strong><small>{% if wealth_has_unknown %}{{ unreconciled_active_count }} Konten noch nicht abgestimmt{% else %}Umschläge im Tresor nur einmal gezählt{% endif %}</small></article>
   <article class="kpi"><span>Frei verfügbar</span><strong>{{ free_available|euro if free_available is not none else 'Nicht abgestimmt' }}</strong><small>Liquide Guthaben + freies Tresorgeld − Verbindlichkeiten</small></article>
   <article class="kpi"><span>Umschläge / reserviert</span><strong>{{ reserved|euro }}</strong><small>Physisch im Tresor enthalten</small></article>
-  <article class="kpi negative"><span>Kartenverbindlichkeiten</span><strong>{{ card_liabilities|euro if card_liabilities is not none else 'Nicht abgestimmt' }}</strong><small>Kreditkartenkonto</small></article>
+  <article class="kpi negative"><span>Verbindlichkeiten</span><strong>{{ card_liabilities|euro if card_liabilities is not none else 'Nicht abgestimmt' }}</strong><small>Bestätigte Verbindlichkeitskonten</small></article>
   <article class="kpi"><span>Cashflow aktueller Monat</span><strong class="{% if cashflow < 0 %}red{% else %}green{% endif %}">{{ cashflow|euro }}</strong><small>{{ income|euro }} Einnahmen + {{ refunds|euro }} Refunds − {{ expenses|euro }} Ausgaben</small></article>
   <article class="kpi"><span>Transfer-Geld</span><strong>{{ reconciliation.transfer_money|euro }}</strong><small>Interne Umschlag-Umverteilung</small></article>
   <article class="kpi warning"><span>Abhebung nötig</span><strong>{{ reconciliation.bank_withdrawal_needed|euro }}</strong><small>Nach freiem Tresorgeld</small></article>

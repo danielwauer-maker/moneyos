@@ -27,7 +27,9 @@ def build_dashboard(session: Session, *, calculation_date: date | None = None) -
     wealth = asset_total - liability_total
 
     vault_rows = [row for row in account_rows if row.account.account_type == "cash_vault"]
-    vault_balance_confirmed = bool(vault_rows) and all(row.current is not None for row in vault_rows)
+    vault_balance_confirmed = bool(vault_rows) and all(
+        row.current is not None for row in vault_rows
+    )
     free_vault = sum(
         (max(vault_free_cash(row.current) or Decimal(), Decimal()) for row in vault_rows),
         Decimal(),
@@ -58,26 +60,25 @@ def build_dashboard(session: Session, *, calculation_date: date | None = None) -
         ),
         Decimal(),
     )
-    free_available = (
-        liquid_assets + free_vault - liability_total if liquidity_complete else None
-    )
+    free_available = liquid_assets + free_vault - liability_total if liquidity_complete else None
 
     month_start = today.replace(day=1)
     next_month = (
-        date(today.year + 1, 1, 1)
-        if today.month == 12
-        else date(today.year, today.month + 1, 1)
+        date(today.year + 1, 1, 1) if today.month == 12 else date(today.year, today.month + 1, 1)
     )
 
     def month_total(event_type: str) -> Decimal:
-        return session.scalar(
-            select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
-                EconomicEvent.event_type == event_type,
-                EconomicEvent.occurred_at >= month_start,
-                EconomicEvent.occurred_at < next_month,
-                EconomicEvent.status.in_(("booked", "confirmed")),
+        return (
+            session.scalar(
+                select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
+                    EconomicEvent.event_type == event_type,
+                    EconomicEvent.occurred_at >= month_start,
+                    EconomicEvent.occurred_at < next_month,
+                    EconomicEvent.status.in_(("booked", "confirmed")),
+                )
             )
-        ) or Decimal()
+            or Decimal()
+        )
 
     income = month_total("income")
     expenses = month_total("expense")
@@ -116,9 +117,9 @@ def build_dashboard(session: Session, *, calculation_date: date | None = None) -
         "unreconciled_active_count": sum(row.current is None for row in account_rows),
         "reserved": reserved,
         "free_available": free_available,
-        "card_liabilities": liability_total if all(
-            row.current is not None for row in account_rows if row.account.is_liability
-        ) else None,
+        "card_liabilities": liability_total
+        if all(row.current is not None for row in account_rows if row.account.is_liability)
+        else None,
         "income": income,
         "expenses": expenses,
         "refunds": refunds,

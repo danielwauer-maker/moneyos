@@ -483,7 +483,12 @@ def planning(request: Request, db: DbSession) -> HTMLResponse:
         active="planning",
         page_title="Planung",
         section="Liquiditätsplanung",
-        description="6–8-Wochen-Prognose, wiederkehrende Kosten und geplante Umschlagzuführungen.",
+        description=(
+            "Das Planungsdatenmodell ist vorhanden, eine belastbare 6–8-Wochen-Prognose "
+            "ist aber noch nicht produktiv. Die Übersicht zeigt deshalb nur tatsächlich "
+            "gespeicherte wiederkehrende Positionen."
+        ),
+        status_label="Noch nicht produktiv",
     )
 
 
@@ -1022,7 +1027,9 @@ def settings(request: Request, db: DbSession) -> HTMLResponse:
         page_title="Einstellungen",
         section="Lokale Einstellungen",
         description=(
-            "Datenbank, Importprofile, Regeln und Darstellungsoptionen – "
-            "standardmäßig vollständig lokal."
+            "Diagnose und produktive Laufzeitkonfiguration sind vorhanden. Eine sichere "
+            "UI zum Ändern von Datenbank-, Importprofil- und Darstellungsoptionen ist noch "
+            "nicht produktiv; diese Einstellungen bleiben derzeit konfigurationsbasiert."
         ),
+        status_label="Noch nicht produktiv",
     )

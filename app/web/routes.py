@@ -204,7 +204,6 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
         projects=list(
             db.scalars(select(Project).where(Project.status == "active").order_by(Project.name))
         ),
-        open_reviews=len(rows),
     )
 
 

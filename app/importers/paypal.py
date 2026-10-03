@@ -115,6 +115,10 @@ class PayPalImportSummary:
     new_raw_records: int = 0
     source_transactions_created: int = 0
     economic_events_created: int = 0
+    imported_transfers: int = 0
+    imported_expenses: int = 0
+    imported_income: int = 0
+    imported_refunds: int = 0
     duplicate_rows: int = 0
     duplicate_rows_within_file: int = 0
     existing_exact_rows: int = 0
@@ -738,6 +742,14 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
             )
             created_events[row.row_number] = event
             summary.economic_events_created += 1
+            if decision.event_type == "transfer":
+                summary.imported_transfers += 1
+            elif decision.event_type == "expense":
+                summary.imported_expenses += 1
+            elif decision.event_type == "income":
+                summary.imported_income += 1
+            elif decision.event_type == "refund":
+                summary.imported_refunds += 1
         elif decision.needs_review:
             db.add(
                 ReviewItem(

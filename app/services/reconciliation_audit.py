@@ -189,10 +189,13 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
         1
         for link in links
         if link.link_type == "settlement_leg"
-        and (source := next(
-            (item for item in sources if item.id == link.source_transaction_id),
-            None,
-        )) is not None
+        and (
+            source := next(
+                (item for item in sources if item.id == link.source_transaction_id),
+                None,
+            )
+        )
+        is not None
         and source.source_system == "amex"
         and (source.metadata_json or {}).get("amex_semantic") == "statement_payment"
     )

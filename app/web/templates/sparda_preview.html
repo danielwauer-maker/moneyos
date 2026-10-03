@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<div class="notice">Neue Zeilen {{ summary.new_rows }} · Bereits vorhanden {{ summary.existing_exact_rows }} · Duplikate in Datei {{ summary.duplicate_rows_within_file }} · Konflikte {{ summary.conflicting_rows }}</div>
 <div class="intro"><div><h2>Sparda-Import prüfen</h2><p>Die Datei ist valide. Identifikatoren und vollständige Zahlungsdaten werden nicht angezeigt.</p></div></div>
 <div class="kpi-grid">
   <article class="kpi"><span>Quellzeilen</span><strong>{{ summary.source_rows_parsed }}</strong><small>UTF-8/BOM und Semikolon geprüft</small></article>

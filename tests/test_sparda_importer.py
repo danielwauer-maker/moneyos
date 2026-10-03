@@ -21,6 +21,7 @@ from app.db.models import (
     EconomicEvent,
     EventSourceLink,
     ImportBatch,
+    ImportConflict,
     RawImportRecord,
     ReviewItem,
     SourceTransaction,
@@ -218,6 +219,21 @@ def test_duplicate_source_row_is_skipped_across_different_files(
     assert summary["source_transactions_created"] == 1
     with factory() as db:
         assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 2
+
+
+def test_same_sparda_natural_identity_with_changed_balance_is_conflict(
+    sparda_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = sparda_store
+    row = _row(**{"Saldo nach Buchung": "1.000,00"})
+    _import(settings, factory, [row])
+    second = _import(settings, factory, [{**row, "Saldo nach Buchung": "999,99"}])
+
+    assert second.metadata_json["import_summary"]["conflicting_rows"] == 1
+    assert second.metadata_json["import_summary"]["source_transactions_created"] == 0
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 1
+        assert db.scalar(select(func.count()).select_from(ImportConflict)) == 1
 
 
 @pytest.mark.parametrize(

@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+<div class="notice">Neue Zeilen {{ summary.new_rows }} · Bereits vorhanden {{ summary.existing_exact_rows }} · Duplikate in Datei {{ summary.duplicate_rows_within_file }} · Konflikte {{ summary.conflicting_rows }}</div>
 <div class="intro"><div><h2>American-Express-Import prüfen</h2><p>Kartenreferenzen und vollständige Rohdaten werden nicht angezeigt. Abrechnungszahlungen bleiben getrennt von Händlerausgaben.</p></div></div>
 <div class="kpi-grid">
   <article class="kpi"><span>Quellzeilen</span><strong>{{ summary.source_rows_parsed }}</strong><small>Struktur und Pflichtspalten geprüft</small></article>

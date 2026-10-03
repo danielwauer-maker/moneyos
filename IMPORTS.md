@@ -1,8 +1,8 @@
 # Importe
 
 Phase 2A stellt die sichere lokale Importgrenze bereit. Sparda-, PayPal- und
-American-Express-CSV besitzen produktive Adapter. Amazon-Daten werden weiterhin
-nur bereitgestellt und validiert; für sie existiert kein produktiver Parser.
+American-Express-CSV besitzen produktive Zahlungsadapter. Amazon besitzt einen
+produktiven ZIP-Enrichment-Adapter, der niemals eigene Economic Events erzeugt.
 
 ## Staging und Validierung
 
@@ -28,7 +28,7 @@ Unterstützte Staging-Formate:
 - Sparda/Bank: `.csv` (produktiv)
 - PayPal: `.csv` (produktiv)
 - American Express: `.csv` (produktiv; PDF wird nicht importiert)
-- Amazon: `.csv`, `.json`, `.zip`
+- Amazon: `.zip` (produktiv, reine Anreicherung)
 
 Die Maximalgröße wird mit `MONEYOS_MAX_IMPORT_FILE_SIZE_BYTES` konfiguriert. Leere,
 zu große oder nicht unterstützte Dateien werden sauber quarantänisiert.
@@ -175,9 +175,10 @@ date, description and booked amount; German and English header aliases and
 flexible column order are supported. PDF statements are not productive import
 sources and are rejected cleanly.
 
-Row identity is based on a source-scoped deterministic fingerprint over stable
-row fields plus a stable occurrence number; a transaction/reference identifier
-is never assumed unique. Full card-number-shaped values are redacted before any
+Row identity is based on a source-scoped natural key plus a deterministic content
+hash over stable row fields. Truly identical repeated rows are skipped, while
+different rows sharing a transaction/reference identifier remain distinct. Full
+card-number-shaped values are redacted before any
 raw or normalized row is persisted. Foreign amount, currency and supplied
 exchange rate are retained without deriving a missing rate.
 
@@ -185,3 +186,37 @@ Statement payments are clearing movements, not merchant expenses. High-
 confidence Sparda matches create only an additive `settlement_leg`; medium and
 unmatched settlements create review items. Failed batches roll back all business
 rows and can be retried, while completed file hashes remain duplicate-protected.
+
+## Amazon „Your Orders“ ZIP
+
+Der Amazon-Adapter verarbeitet das Export-ZIP direkt und extrahiert keine Dateien.
+Relevante CSVs sind Order History, Digital Content Orders, Refund Details,
+Return Requests/Status, Digital Returns, Returns.2 und Replacement Orders.
+PDFs, Bilder, Skripte und sonstige Archivbestandteile werden nicht ausgeführt.
+
+Amazon-Daten sind reine Anreicherung. Neue Bestellpositionen, Refunds, Returns und
+Ersatzlieferungen erzeugen `AmazonEnrichmentRecord`-Zeilen, aber weder
+`SourceTransaction` noch `EconomicEvent`. Konservative Betrags-/Datums-/Zahlungs-
+hinweise dürfen nur einen additiven `AmazonPaymentMatch` zu einem vorhandenen
+kanonischen Ereignis erzeugen. Gesplittete Zahlungen, Gutscheine, mehrere
+Kandidaten und unvollständige Quellen bleiben mittlere oder ungeklärte Vorschläge.
+
+Die Vorschau trennt `duplicate_within_file`, `existing_exact`,
+`existing_conflict`, `unique_source_rows` und `new_rows`. Dieselbe natürliche
+Identität mit abweichendem Inhalt wird als Konflikt gespeichert und nie still
+überschrieben. Der read-only Audit ist:
+
+```powershell
+$env:MONEYOS_DEMO_MODE = "false"
+python -m app.ops audit-amazon "C:\Pfad\Your Orders.zip"
+```
+
+Vor der bestätigten Ausführung erzeugt die Webroute ein privates Safety-Backup.
+`FileDescriptions.csv` dient nur zur Dokumentation des Exports und wird nicht als
+produktive Importquelle benötigt.
+
+Die explizite produktive Zeitgrenze ist standardmäßig `2026-01-01`
+(`MONEYOS_AMAZON_IMPORT_START_DATE`). Die Vorschau weist Vollarchiv und produktiven
+Scope getrennt aus. Historische oder nicht sicher datierbare Zeilen bleiben Teil
+der Parserstatistik, erzeugen aber weder Enrichment Records noch Matches, Reviews,
+Konflikte, Source Transactions oder Economic Events.

@@ -21,9 +21,9 @@ ALLOWED_EXTENSIONS: dict[str, frozenset[str]] = {
     "bank": frozenset({".csv"}),
     "paypal": frozenset({".csv"}),
     "amex": frozenset({".csv"}),
-    "amazon": frozenset({".csv", ".json", ".zip"}),
+    "amazon": frozenset({".zip"}),
 }
-PRODUCTIVE_IMPORT_SOURCES = frozenset({"sparda", "paypal", "amex"})
+PRODUCTIVE_IMPORT_SOURCES = frozenset({"sparda", "paypal", "amex", "amazon"})
 PREVIEWABLE_IMPORT_STATUSES = frozenset({"valid", "failed"})
 SUSPICIOUS_ZIP_SUFFIXES = frozenset(
     {".exe", ".js", ".vbs", ".ps1", ".bat", ".cmd", ".scr", ".dll", ".msi", ".docm", ".xlsm"}
@@ -229,9 +229,12 @@ def stage_upload(
                     "unsupported_extension", "Der Dateityp ist für diese Quelle nicht erlaubt."
                 )
             )
-        detected_mime, content_issues = _inspect_file(
-            staged_path, suffix, size, settings.max_import_file_size_bytes
+        size_limit = (
+            settings.max_amazon_import_file_size_bytes
+            if source_type == "amazon"
+            else settings.max_import_file_size_bytes
         )
+        detected_mime, content_issues = _inspect_file(staged_path, suffix, size, size_limit)
         issues.extend(content_issues)
         if source_type == "sparda" and not issues:
             from app.importers.sparda import SpardaFormatError, parse_sparda_csv
@@ -253,6 +256,13 @@ def stage_upload(
             try:
                 parse_amex_csv(staged_path)
             except AmexFormatError as exc:
+                issues.append(ValidationIssue(exc.code, exc.message))
+        elif source_type == "amazon" and not issues:
+            from app.importers.amazon import AmazonFormatError, parse_amazon_export
+
+            try:
+                parse_amazon_export(staged_path)
+            except AmazonFormatError as exc:
                 issues.append(ValidationIssue(exc.code, exc.message))
 
         if issues:

@@ -29,6 +29,11 @@ from app.db.models import (
 from app.importers.sparda import PrivateProfileRequiredError
 from app.security.redaction import redact_card_numbers, redact_text
 from app.services.import_execution import run_atomic_import
+from app.services.import_identity import (
+    IdentityStatus,
+    SourceIdentityTracker,
+    add_source_conflict,
+)
 
 REQUIRED_FIELDS = frozenset({"booking_date", "description", "amount"})
 HEADER_ALIASES = {
@@ -193,6 +198,11 @@ class AmexImportSummary:
     source_transactions_created: int = 0
     economic_events_created: int = 0
     duplicate_rows: int = 0
+    duplicate_rows_within_file: int = 0
+    existing_exact_rows: int = 0
+    conflicting_rows: int = 0
+    unique_source_rows: int = 0
+    new_rows: int = 0
     duplicate_files: int = 0
     failed_rows: int = 0
     repeated_reference_ids: int = 0
@@ -288,10 +298,36 @@ def parse_amex_date(value: str, *, optional: bool = False) -> datetime | None:
     raise AmexFormatError("invalid_date", "Ein Amex-Datum ist ungültig.")
 
 
-def _stable_fingerprint(values: dict[str, str], occurrence: int) -> str:
+def _stable_fingerprint(values: dict[str, str]) -> str:
     payload = json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    base = hashlib.sha256(f"amex|{payload}".encode()).hexdigest()
-    return hashlib.sha256(f"{base}|occurrence:{occurrence}".encode()).hexdigest()
+    return hashlib.sha256(f"amex|{payload}".encode()).hexdigest()
+
+
+def _canonical_values(raw_values: dict[str, str]) -> dict[str, str]:
+    return {
+        canonical: value.strip()
+        for header, value in raw_values.items()
+        if (canonical := _canonical_header(header))
+    }
+
+
+def _natural_key(raw_values: dict[str, str]) -> str:
+    values = _canonical_values(raw_values)
+    stable = {
+        key: values.get(key, "")
+        for key in (
+            "booking_date",
+            "transaction_date",
+            "description",
+            "amount",
+            "currency",
+            "reference_id",
+            "card_reference",
+        )
+    }
+    stable["card_reference"] = redact_card_numbers(stable["card_reference"])
+    payload = json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(f"amex-natural|{payload}".encode()).hexdigest()
 
 
 def parse_amex_csv(path: Path) -> list[AmexRow]:
@@ -322,7 +358,6 @@ def parse_amex_csv(path: Path) -> list[AmexRow]:
         )
 
     rows: list[AmexRow] = []
-    occurrences: Counter[str] = Counter()
     previous_line = reader.line_num
     try:
         for csv_values in reader:
@@ -360,16 +395,8 @@ def parse_amex_csv(path: Path) -> list[AmexRow]:
                 stable_values["card_reference"] = redact_card_numbers(
                     stable_values["card_reference"]
                 )
-            stable_payload = json.dumps(
-                stable_values, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            )
-            occurrence_key = hashlib.sha256(stable_payload.encode()).hexdigest()
-            occurrences[occurrence_key] += 1
-            occurrence = occurrences[occurrence_key]
-            fingerprint = _stable_fingerprint(stable_values, occurrence)
-            raw_hash = hashlib.sha256(
-                f"amex-raw|{raw_text}|occurrence:{occurrence}".encode()
-            ).hexdigest()
+            fingerprint = _stable_fingerprint(stable_values)
+            raw_hash = hashlib.sha256(f"amex-raw|{raw_text}".encode()).hexdigest()
             rows.append(
                 AmexRow(
                     row_number=row_number,
@@ -615,6 +642,7 @@ def preview_amex_file(
     rows = parse_amex_csv(path)
     matches = match_sparda_settlements(db, rows)
     summary = _summary(rows, matches)
+    _apply_identity_summary(summary, rows, db)
     preview = [
         AmexPreviewRow(
             row_number=row.row_number,
@@ -644,19 +672,10 @@ def dry_run_amex_file(path: Path, db: Session) -> AmexDryRunReport:
     rows = parse_amex_csv(path)
     matches = match_sparda_settlements(db, rows)
     summary = _summary(rows, matches)
+    _apply_identity_summary(summary, rows, db)
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     existing_batch = db.scalar(select(ImportBatch).where(ImportBatch.source_hash == source_hash))
     duplicate_file = existing_batch is not None and existing_batch.status == "imported"
-    fingerprints = {row.fingerprint for row in rows}
-    duplicate_rows = len(
-        set(
-            db.scalars(
-                select(SourceTransaction.fingerprint).where(
-                    SourceTransaction.fingerprint.in_(fingerprints)
-                )
-            )
-        )
-    )
     dates = [row.booked_at.date() for row in rows]
     return AmexDryRunReport(
         source_rows=len(rows),
@@ -664,7 +683,7 @@ def dry_run_amex_file(path: Path, db: Session) -> AmexDryRunReport:
         date_to=max(dates).isoformat(),
         duplicate_file=duplicate_file,
         existing_batch_status=existing_batch.status if existing_batch else None,
-        duplicate_rows=duplicate_rows,
+        duplicate_rows=summary.duplicate_rows,
         merchant_purchases=summary.merchant_purchases,
         refunds=summary.refunds,
         settlement_rows=summary.settlement_rows,
@@ -682,6 +701,26 @@ def _amex_account(db: Session) -> Account | None:
     return db.scalar(select(Account).where(Account.name == "American Express"))
 
 
+def _apply_identity_summary(summary: AmexImportSummary, rows: list[AmexRow], db: Session) -> None:
+    tracker = SourceIdentityTracker(db, "amex", _natural_key)
+    for row in rows:
+        result = tracker.classify(
+            natural_key=_natural_key(row.raw_values),
+            content_hash=row.fingerprint,
+            payload=row.raw_values,
+        )
+        if result.status == IdentityStatus.DUPLICATE_WITHIN_FILE:
+            summary.duplicate_rows_within_file += 1
+        elif result.status == IdentityStatus.EXISTING_EXACT:
+            summary.existing_exact_rows += 1
+        elif result.status == IdentityStatus.EXISTING_CONFLICT:
+            summary.conflicting_rows += 1
+        else:
+            summary.new_rows += 1
+    summary.duplicate_rows = summary.duplicate_rows_within_file + summary.existing_exact_rows
+    summary.unique_source_rows = len(rows) - summary.duplicate_rows_within_file
+
+
 def _protected_raw_values(row: AmexRow) -> dict[str, str]:
     return {key: redact_card_numbers(value) for key, value in row.raw_values.items()}
 
@@ -694,15 +733,34 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
     account = _amex_account(db)
     created_sources: dict[int, SourceTransaction] = {}
     created_events: dict[int, EconomicEvent] = {}
-    seen: set[str] = set()
+    tracker = SourceIdentityTracker(db, "amex", _natural_key)
 
     for row in rows:
-        if row.fingerprint in seen or db.scalar(
-            select(SourceTransaction.id).where(SourceTransaction.fingerprint == row.fingerprint)
-        ):
-            summary.duplicate_rows += 1
+        natural_key = _natural_key(row.raw_values)
+        identity = tracker.classify(
+            natural_key=natural_key,
+            content_hash=row.fingerprint,
+            payload=row.raw_values,
+        )
+        if identity.status != IdentityStatus.NEW:
+            if identity.status == IdentityStatus.DUPLICATE_WITHIN_FILE:
+                summary.duplicate_rows_within_file += 1
+                summary.duplicate_rows += 1
+            elif identity.status == IdentityStatus.EXISTING_EXACT:
+                summary.existing_exact_rows += 1
+                summary.duplicate_rows += 1
+            else:
+                summary.conflicting_rows += 1
+                add_source_conflict(
+                    db,
+                    batch,
+                    source_system="amex",
+                    natural_key=natural_key,
+                    incoming_content_hash=row.fingerprint,
+                    result=identity,
+                )
             continue
-        seen.add(row.fingerprint)
+        summary.new_rows += 1
         decision = classify_amex_row(row)
         raw = RawImportRecord(
             import_batch_id=batch.id,
@@ -751,6 +809,7 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
                 "card_reference": redact_card_numbers(row.card_reference),
             },
             fingerprint=row.fingerprint,
+            source_natural_key=natural_key,
         )
         db.add(source)
         db.flush()
@@ -871,6 +930,7 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
             )
             summary.review_items += 1
 
+    summary.unique_source_rows = len(rows) - summary.duplicate_rows_within_file
     batch.metadata_json = {**(batch.metadata_json or {}), "import_summary": summary.as_dict()}
     return len(rows)
 

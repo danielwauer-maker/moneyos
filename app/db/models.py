@@ -151,7 +151,16 @@ class RawImportRecord(Base):
 
 class SourceTransaction(Base):
     __tablename__ = "source_transactions"
-    __table_args__ = (UniqueConstraint("source_system", "source_transaction_id"),)
+    __table_args__ = (
+        UniqueConstraint("source_system", "source_transaction_id"),
+        Index(
+            "uq_source_transactions_natural_key",
+            "source_system",
+            "source_natural_key",
+            unique=True,
+            sqlite_where=text("source_natural_key IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     import_batch_id: Mapped[int | None] = mapped_column(ForeignKey("import_batches.id"))
@@ -170,6 +179,7 @@ class SourceTransaction(Base):
     status: Mapped[str] = mapped_column(String(30), default="booked")
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
+    source_natural_key: Mapped[str | None] = mapped_column(String(64))
     account_links: Mapped[list[SourceTransactionAccount]] = relationship(
         back_populates="source_transaction"
     )
@@ -344,6 +354,82 @@ class EventSourceLink(Base):
     link_type: Mapped[str] = mapped_column(String(40))
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
     notes: Mapped[str | None] = mapped_column(Text)
+
+
+class AmazonEnrichmentRecord(Base):
+    """Immutable Amazon order/refund evidence; never a financial transaction."""
+
+    __tablename__ = "amazon_enrichment_records"
+    __table_args__ = (
+        UniqueConstraint("record_type", "natural_key"),
+        UniqueConstraint("raw_record_id"),
+        CheckConstraint(
+            "record_type IN ('order_item','digital_order_item','refund','return','replacement')",
+            name="ck_amazon_enrichment_record_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    import_batch_id: Mapped[int] = mapped_column(ForeignKey("import_batches.id"))
+    raw_record_id: Mapped[int] = mapped_column(ForeignKey("raw_import_records.id"))
+    record_type: Mapped[str] = mapped_column(String(30))
+    natural_key: Mapped[str] = mapped_column(String(64))
+    content_hash: Mapped[str] = mapped_column(String(64))
+    order_key: Mapped[str | None] = mapped_column(String(64), index=True)
+    item_key: Mapped[str | None] = mapped_column(String(64), index=True)
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime)
+    amount: Mapped[Decimal | None] = mapped_column(MONEY)
+    currency: Mapped[str | None] = mapped_column(String(3))
+    product_title: Mapped[str | None] = mapped_column(Text)
+    asin: Mapped[str | None] = mapped_column(String(20))
+    payment_method: Mapped[str | None] = mapped_column(String(255))
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class AmazonPaymentMatch(Base):
+    __tablename__ = "amazon_payment_matches"
+    __table_args__ = (
+        UniqueConstraint("amazon_record_id", "economic_event_id", "match_type"),
+        CheckConstraint("match_type IN ('payment','refund')", name="ck_amazon_payment_match_type"),
+        CheckConstraint("status IN ('linked','review')", name="ck_amazon_payment_match_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    amazon_record_id: Mapped[int] = mapped_column(ForeignKey("amazon_enrichment_records.id"))
+    economic_event_id: Mapped[int] = mapped_column(ForeignKey("economic_events.id"))
+    match_type: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20))
+    confidence: Mapped[Decimal] = mapped_column(Numeric(5, 4))
+    reason: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class ImportConflict(Base):
+    __tablename__ = "import_conflicts"
+    __table_args__ = (
+        UniqueConstraint(
+            "import_batch_id", "source_system", "natural_key", "incoming_content_hash"
+        ),
+        CheckConstraint(
+            "status IN ('open','resolved','ignored')", name="ck_import_conflict_status"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    import_batch_id: Mapped[int] = mapped_column(ForeignKey("import_batches.id"))
+    source_system: Mapped[str] = mapped_column(String(30))
+    natural_key: Mapped[str] = mapped_column(String(64))
+    incoming_content_hash: Mapped[str] = mapped_column(String(64))
+    existing_source_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("source_transactions.id")
+    )
+    existing_amazon_record_id: Mapped[int | None] = mapped_column(
+        ForeignKey("amazon_enrichment_records.id")
+    )
+    differing_fields_json: Mapped[list[str]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(20), default="open")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class EnvelopeMovement(Base):

@@ -331,6 +331,25 @@ def test_duplicate_reference_ids_do_not_collapse_distinct_rows(tmp_path: Path) -
     assert len({row.fingerprint for row in rows}) == 2
 
 
+def test_identical_amex_rows_are_within_file_duplicates(
+    amex_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = amex_store
+    batch = _stage(settings, factory, [_row(), _row()])
+
+    import_amex_batch(factory, batch.id, settings)
+
+    with factory() as db:
+        current = db.get(ImportBatch, batch.id)
+        assert current is not None
+        summary = current.metadata_json["import_summary"]
+        assert summary["source_rows_parsed"] == 2
+        assert summary["duplicate_rows_within_file"] == 1
+        assert summary["unique_source_rows"] == 1
+        assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 1
+        assert db.scalar(select(func.count()).select_from(EconomicEvent)) == 1
+
+
 def test_fingerprint_is_stable_across_column_order(tmp_path: Path) -> None:
     first = tmp_path / "first.csv"
     second = tmp_path / "second.csv"

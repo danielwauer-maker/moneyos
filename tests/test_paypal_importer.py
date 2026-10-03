@@ -19,6 +19,7 @@ from app.db.models import (
     EconomicEvent,
     EventSourceLink,
     ImportBatch,
+    ImportConflict,
     RawImportRecord,
     ReviewItem,
     SourceTransaction,
@@ -462,6 +463,21 @@ def test_duplicate_file_and_row_detection_distinguishes_staged_and_completed(
         [row, _row(**{"Transaktionscode": "SYN-MERCHANT-2", "Brutto": "-5,00", "Netto": "-5,00"})],
     )
     assert second.metadata_json["import_summary"]["duplicate_rows"] == 1
+
+
+def test_same_paypal_natural_identity_with_changed_status_is_conflict(
+    paypal_store: tuple[Settings, sessionmaker[Session]],
+) -> None:
+    settings, factory = paypal_store
+    row = _row(**{"Status": "Abgeschlossen"})
+    _import(settings, factory, [row])
+    second = _import(settings, factory, [{**row, "Status": "Offen"}])
+
+    assert second.metadata_json["import_summary"]["conflicting_rows"] == 1
+    assert second.metadata_json["import_summary"]["source_transactions_created"] == 0
+    with factory() as db:
+        assert db.scalar(select(func.count()).select_from(SourceTransaction)) == 1
+        assert db.scalar(select(func.count()).select_from(ImportConflict)) == 1
 
 
 def test_full_import_rolls_back_on_failure(

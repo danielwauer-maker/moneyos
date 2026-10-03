@@ -26,6 +26,11 @@ from app.db.models import (
 from app.domain.sparda import CategorySuggestion, SpardaDecision, classify_sparda_transaction
 from app.security.redaction import redact_text
 from app.services.import_execution import run_atomic_import
+from app.services.import_identity import (
+    IdentityStatus,
+    SourceIdentityTracker,
+    add_source_conflict,
+)
 
 KNOWN_COLUMNS = (
     "Bezeichnung Auftragskonto",
@@ -103,6 +108,11 @@ class ImportSummary:
     review_items: int = 0
     review_only_rows: int = 0
     duplicate_rows: int = 0
+    duplicate_rows_within_file: int = 0
+    existing_exact_rows: int = 0
+    conflicting_rows: int = 0
+    unique_source_rows: int = 0
+    new_rows: int = 0
     duplicate_files: int = 0
     failed_rows: int = 0
 
@@ -180,6 +190,24 @@ def _fingerprint(values: dict[str, str], amount: Decimal, booked_at: datetime) -
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _natural_key(values: dict[str, str]) -> str:
+    stable = {
+        "account_iban": values.get("IBAN Auftragskonto", "").replace(" ", "").upper(),
+        "booked_at": values.get("Buchungstag", "").strip(),
+        "value_date": values.get("Valutadatum", "").strip(),
+        "amount": values.get("Betrag", "").strip(),
+        "currency": values.get("Waehrung", "").strip().upper(),
+        "counterparty_iban": values.get("IBAN Zahlungsbeteiligter", "").replace(" ", "").upper(),
+        "counterparty": values.get("Name Zahlungsbeteiligter", "").strip(),
+        "booking_text": values.get("Buchungstext", "").strip(),
+        "purpose": values.get("Verwendungszweck", "").strip(),
+        "creditor_id": values.get("Glaeubiger ID", "").strip(),
+        "mandate_reference": values.get("Mandatsreferenz", "").strip(),
+    }
+    payload = json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(f"sparda|{payload}".encode()).hexdigest()
+
+
 def parse_sparda_csv(path: Path) -> list[SpardaRow]:
     try:
         text = path.read_text(encoding="utf-8-sig")
@@ -255,11 +283,27 @@ def parse_sparda_csv(path: Path) -> list[SpardaRow]:
     return rows
 
 
-def preview_sparda_file(path: Path) -> tuple[list[PreviewRow], ImportSummary]:
+def preview_sparda_file(
+    path: Path, db: Session | None = None
+) -> tuple[list[PreviewRow], ImportSummary]:
     rows = parse_sparda_csv(path)
     summary = ImportSummary(source_rows_parsed=len(rows))
+    tracker = SourceIdentityTracker(db, "sparda", _natural_key)
     previews: list[PreviewRow] = []
     for row in rows:
+        identity = tracker.classify(
+            natural_key=_natural_key(row.raw_values),
+            content_hash=row.fingerprint,
+            payload=row.raw_values,
+        )
+        if identity.status == IdentityStatus.DUPLICATE_WITHIN_FILE:
+            summary.duplicate_rows_within_file += 1
+        elif identity.status == IdentityStatus.EXISTING_EXACT:
+            summary.existing_exact_rows += 1
+        elif identity.status == IdentityStatus.EXISTING_CONFLICT:
+            summary.conflicting_rows += 1
+        else:
+            summary.new_rows += 1
         decision = _decision(row)
         event_type = decision.event_type or "review"
         if decision.event_type:
@@ -279,6 +323,8 @@ def preview_sparda_file(path: Path) -> tuple[list[PreviewRow], ImportSummary]:
                 needs_review=decision.review_type is not None,
             )
         )
+    summary.duplicate_rows = summary.duplicate_rows_within_file + summary.existing_exact_rows
+    summary.unique_source_rows = len(rows) - summary.duplicate_rows_within_file
     return previews, summary
 
 
@@ -352,14 +398,33 @@ def _source_account(db: Session, account_name: str) -> Account | None:
 def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
     rows = parse_sparda_csv(path)
     summary = ImportSummary(source_rows_parsed=len(rows))
-    seen: set[str] = set()
+    tracker = SourceIdentityTracker(db, "sparda", _natural_key)
     for row in rows:
-        if row.fingerprint in seen or db.scalar(
-            select(SourceTransaction.id).where(SourceTransaction.fingerprint == row.fingerprint)
-        ):
-            summary.duplicate_rows += 1
+        natural_key = _natural_key(row.raw_values)
+        identity = tracker.classify(
+            natural_key=natural_key,
+            content_hash=row.fingerprint,
+            payload=row.raw_values,
+        )
+        if identity.status != IdentityStatus.NEW:
+            if identity.status == IdentityStatus.DUPLICATE_WITHIN_FILE:
+                summary.duplicate_rows_within_file += 1
+                summary.duplicate_rows += 1
+            elif identity.status == IdentityStatus.EXISTING_EXACT:
+                summary.existing_exact_rows += 1
+                summary.duplicate_rows += 1
+            else:
+                summary.conflicting_rows += 1
+                add_source_conflict(
+                    db,
+                    batch,
+                    source_system="sparda",
+                    natural_key=natural_key,
+                    incoming_content_hash=row.fingerprint,
+                    result=identity,
+                )
             continue
-        seen.add(row.fingerprint)
+        summary.new_rows += 1
         decision = _decision(row)
         raw = RawImportRecord(
             import_batch_id=batch.id,
@@ -395,6 +460,7 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
                 "target_account_type": decision.target_account_type,
             },
             fingerprint=row.fingerprint,
+            source_natural_key=natural_key,
         )
         db.add(source)
         db.flush()
@@ -451,6 +517,7 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
             if decision.event_type is None:
                 summary.review_only_rows += 1
 
+    summary.unique_source_rows = len(rows) - summary.duplicate_rows_within_file
     batch.metadata_json = {**(batch.metadata_json or {}), "import_summary": summary.as_dict()}
     return len(rows)
 

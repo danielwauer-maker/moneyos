@@ -99,3 +99,19 @@ redacts card-number-shaped data and other identifiers; full card numbers are
 redacted before persistence even inside protected raw rows. A private safety
 backup is created immediately before productive Amex execution. The read-only
 `audit-amex` command neither stages a file nor creates an Import Batch.
+
+## Amazon enrichment imports
+
+Only synthetic Amazon fixtures belong in Git. Real order ZIPs, extracted order
+CSVs, invoices, identifiers, product titles and payment details remain in the
+protected private data area or another encrypted local folder. The adapter reads
+CSV members without extracting the archive and never executes PDFs, macros,
+scripts or embedded content. UI summaries and logs expose only aggregate counts
+and redacted labels.
+
+Amazon natural identifiers are stored as hashes in normalized enrichment rows;
+the immutable raw record remains protected locally. Cross-batch conflicts record
+hashes and differing field names rather than private values. A read-only
+`audit-amazon` invocation creates no batch, staging copy, business row or match.
+Confirmed execution creates a safety backup first and remains disabled in the
+fictional demo profile.

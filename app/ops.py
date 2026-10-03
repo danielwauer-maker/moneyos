@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.db.session import SessionLocal
+from app.importers.amazon import dry_run_amazon_file
 from app.importers.amex import dry_run_amex_file
 from app.importers.paypal import dry_run_paypal_file
 from app.services.backup import create_backup, restore_backup
@@ -64,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read-only structural and settlement audit of a local Amex CSV",
     )
     amex_audit.add_argument("file", type=Path)
+    amazon_audit = commands.add_parser(
+        "audit-amazon",
+        help="Read-only structural, duplicate and payment-match audit of an Amazon ZIP",
+    )
+    amazon_audit.add_argument("file", type=Path)
     return parser
 
 
@@ -161,6 +167,12 @@ def main() -> None:
         with SessionLocal() as db:
             report = dry_run_amex_file(args.file, db)
         print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
+    elif args.command == "audit-amazon":
+        if settings.demo_mode:
+            raise ValueError("audit-amazon requires MONEYOS_DEMO_MODE=false")
+        with SessionLocal() as db:
+            report = dry_run_amazon_file(args.file, db, settings.amazon_import_start_date)
+        print(json.dumps(report, indent=2, ensure_ascii=True))
 
 
 if __name__ == "__main__":

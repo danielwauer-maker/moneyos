@@ -18,7 +18,7 @@
 {% endif %}
 <article class="panel">
   <h3>Lokales Import-Staging</h3>
-  <p>Sparda-, PayPal- und American-Express-CSV sind produktiv mit redaktierter Vorschau und atomarem Import. Amazon-Dateien werden weiterhin nur sicher bereitgestellt.</p>
+  <p>Sparda-, PayPal- und American-Express-CSV sowie Amazon-Bestell-ZIP sind produktiv mit redaktierter Vorschau und atomarem Import.</p>
   <form action="/import/stage" method="post" enctype="multipart/form-data" class="upload-form">
     <label>Quelle <select name="source_type" required><option value="sparda">Sparda</option><option value="paypal">PayPal</option><option value="amex">American Express</option><option value="amazon">Amazon</option></select></label>
     <label>Datei <input name="upload" type="file" required></label>

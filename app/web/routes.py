@@ -20,6 +20,11 @@ from app.db.models import (
     SourceTransactionAccount,
 )
 from app.db.session import get_db
+from app.importers.amazon import (
+    AmazonFormatError,
+    import_amazon_batch,
+    preview_amazon_file,
+)
 from app.importers.amex import (
     AmexFormatError,
     import_amex_batch,
@@ -828,6 +833,23 @@ def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
     if not is_batch_previewable(batch):
         raise HTTPException(status_code=404, detail="Import batch is not previewable")
     path = batch_file_path(batch, get_settings())
+    if batch.source_type == "amazon":
+        try:
+            rows, summary, _matches = preview_amazon_file(
+                path, db, get_settings().amazon_import_start_date
+            )
+        except AmazonFormatError as exc:
+            raise HTTPException(status_code=422, detail=exc.code) from exc
+        return render(
+            request,
+            "amazon_preview.html",
+            active="import",
+            page_title="Amazon-Enrichment-Vorschau",
+            batch=batch,
+            rows=rows[:100],
+            summary=summary.as_dict(),
+            truncated=len(rows) > 100,
+        )
     if batch.source_type == "amex":
         try:
             rows, summary, _matches = preview_amex_file(path, db)
@@ -859,7 +881,7 @@ def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
             truncated=len(rows) > 100,
         )
     try:
-        rows, summary = preview_sparda_file(path)
+        rows, summary = preview_sparda_file(path, db)
     except SpardaFormatError as exc:
         raise HTTPException(status_code=422, detail=exc.code) from exc
     return render(
@@ -884,12 +906,12 @@ def execute_import(batch_id: int, db: DbSession) -> RedirectResponse:
     batch = db.get(ImportBatch, batch_id)
     if (
         batch is None
-        or batch.source_type not in {"sparda", "paypal", "amex"}
+        or batch.source_type not in {"sparda", "paypal", "amex", "amazon"}
         or batch.status not in {"valid", "failed"}
     ):
         raise HTTPException(status_code=404, detail="Import batch is not executable")
     factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
-    if batch.source_type in {"paypal", "amex"}:
+    if batch.source_type in {"paypal", "amex", "amazon"}:
         settings = get_settings()
         create_backup(
             settings.active_database_url,
@@ -898,8 +920,10 @@ def execute_import(batch_id: int, db: DbSession) -> RedirectResponse:
         )
         if batch.source_type == "paypal":
             import_paypal_batch(factory, batch_id, settings)
-        else:
+        elif batch.source_type == "amex":
             import_amex_batch(factory, batch_id, settings)
+        else:
+            import_amazon_batch(factory, batch_id, settings)
     else:
         import_sparda_batch(factory, batch_id, get_settings())
     return RedirectResponse(f"/import?batch_id={batch_id}", status_code=303)

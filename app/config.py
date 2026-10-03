@@ -1,3 +1,4 @@
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,6 +15,8 @@ class Settings(BaseSettings):
     backup_dir: Path = Path("backups")
     log_dir: Path = Path("logs")
     max_import_file_size_bytes: int = 25 * 1024 * 1024
+    max_amazon_import_file_size_bytes: int = 150 * 1024 * 1024
+    amazon_import_start_date: date = date(2026, 1, 1)
     staged_import_retention_days: int = 90
     quarantine_retention_days: int = 365
     log_retention_days: int = 30

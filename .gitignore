@@ -38,6 +38,7 @@ secrets/
 .secrets*
 id_rsa*
 *.tmp
+.tmp_*.py
 __pycache__/
 *.py[cod]
 .pytest_cache/

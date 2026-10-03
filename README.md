@@ -7,7 +7,9 @@ atomare Importgrenzen, Backups/Restore, Aufbewahrungsregeln und eine Diagnose.
 Phase 2B enthält den produktiven Sparda-CSV-Adapter; Phase 2C ergänzt den
 produktiven PayPal-CSV-Adapter mit konservativem Sparda-Funding-Matching.
 Phase 2D ergänzt American-Express-CSV mit konservativem Settlement-Matching.
-Ein Amazon-Parser ist bewusst noch nicht enthalten.
+Phase 2E ergänzt Amazon-„Your Orders“-ZIPs als reine Anreicherung: Sie verknüpfen
+Bestelldetails mit vorhandenen Zahlungen, erzeugen aber nie ein zweites Economic
+Event.
 
 ## Voraussetzungen
 
@@ -119,7 +121,8 @@ redigierte Vorschau; importiert wird erst nach „Atomaren Import starten“. Ei
 zuvor im Demo-Profil bereitgestellte Datei wird absichtlich nicht profilübergreifend
 übernommen. PayPal besitzt eine eigene redigierte Vorschau und wird erst nach
 ausdrücklicher Bestätigung und automatischem Safety-Backup atomar importiert.
-Amex und Amazon bleiben spätere, getrennte Adapter.
+Amex und Amazon bleiben getrennte Adapter: Amex liefert Zahlungsereignisse,
+Amazon ausschließlich Anreicherungen zu bereits vorhandenen Ereignissen.
 
 Nach dem ersten Sparda-Import werden die bestätigten privaten Konto- und
 Umschlagstammdaten samt additivem Kontobackfill einmalig beziehungsweise beliebig
@@ -250,3 +253,33 @@ Ein ausschließlich lesender Audit einer lokalen CSV lautet:
 $env:MONEYOS_DEMO_MODE = "false"
 .\.venv\Scripts\python.exe -m app.ops audit-amex "C:\Pfad\Umsaetze.csv"
 ```
+
+### Amazon-Enrichment
+
+Der Amazon-Adapter akzeptiert ausschließlich das originale ZIP aus „Your Orders“.
+Er liest relevante CSV-Dateien direkt aus dem Archiv, extrahiert das ZIP nicht und
+ignoriert Rechnungs-PDFs, Bilder und sonstige eingebettete Inhalte. Bestellpositionen,
+digitale Positionen, Refunds, Returns und Ersatzlieferungen werden als
+unveränderliche Enrichment Records gespeichert. Sie erzeugen weder Source
+Transactions noch Economic Events.
+
+Starke Amazon-Bestell-/Positionskennungen bilden zusammen mit einem Inhaltshash
+die Identität. Exakte Wiederholungen werden übersprungen; bei derselben natürlichen
+Identität mit verändertem Inhalt entsteht ein prüfbarer Konflikt, ohne den
+vorhandenen Datensatz zu überschreiben. Zahlungszuordnungen zu bestehenden
+Sparda-, PayPal- oder Amex-Ereignissen sind ausschließlich additive Links.
+Mehrdeutige, gesplittete und Gutschein-Zahlungen bleiben Vorschläge.
+
+Der ausschließlich lesende Audit lautet:
+
+```powershell
+$env:MONEYOS_DEMO_MODE = "false"
+.\.venv\Scripts\python.exe -m app.ops audit-amazon "C:\Pfad\Your Orders.zip"
+```
+
+Das ZIP wird dabei weder gestaged noch importiert. Die maximale Größe ist über
+`MONEYOS_MAX_AMAZON_IMPORT_FILE_SIZE_BYTES` konfigurierbar; Standard sind 150 MiB.
+Der produktive Amazon-Zeitraum beginnt standardmäßig am `2026-01-01` und kann mit
+`MONEYOS_AMAZON_IMPORT_START_DATE` angepasst werden. Parser und Audit erfassen das
+Vollarchiv; nur datierbare Datensätze ab dem Stichtag nehmen an Persistenz,
+Idempotenzprüfung und Payment Matching teil.

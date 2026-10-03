@@ -110,8 +110,10 @@ darf an `app/services/import_execution.py` übergeben werden. Der spätere Parse
 Callback läuft mit allen Raw Records, Source Transactions, Economic Events und
 Links in genau einer DB-Transaktion. Bei einem Fehler bleibt nur der Batch mit
 einem neutralen Diagnosecode bestehen; alle finanziellen Teilzeilen werden
-zurückgerollt. Dateihash und eindeutige Transaktions-Fingerprints bilden zwei
-Idempotenzebenen.
+zurückgerollt. Dateihash, natürliche Quellidentität und Inhaltshash bilden drei
+Idempotenzebenen. Exakte Wiederholungen werden von Konflikten getrennt; ein
+Konflikt hält nur geänderte Feldnamen und Hashes fest und überschreibt nie die
+unveränderliche Quelle.
 
 Importzustände: `uploaded` → `validating` → `valid` → `imported`; verdächtige
 Dateien gehen nach `quarantined`, Parserfehler nach `failed`. Legacy-`pending`
@@ -167,3 +169,21 @@ payment never does: a high-confidence match adds the Amex source as a
 matches create review items only. Original-currency facts remain Source
 Transaction metadata, and balance confirmations remain the sole authority for
 the current reconciled card liability.
+
+## Phase 2E Amazon enrichment and global identity
+
+`app/services/import_identity.py` is the shared identity boundary for productive
+source importers. A source-scoped natural key identifies the source row; the
+content hash proves whether it is exact or materially changed. The result is one
+of `NEW`, `DUPLICATE_WITHIN_FILE`, `EXISTING_EXACT` or `EXISTING_CONFLICT`.
+Existing legacy rows are compared through a derived natural key and are not
+rewritten.
+
+`app/importers/amazon.py` is deliberately an enrichment adapter. It reads the
+relevant CSV members in the Amazon archive without extraction. Immutable
+`AmazonEnrichmentRecord` rows hold order-item, refund, return and replacement
+facts. `AmazonPaymentMatch` adds a payment/refund relationship to an existing
+canonical event; no Amazon row can own a Source Transaction or Economic Event.
+Split tenders, gift-card participation and non-unique candidates are never
+high-confidence matches. `ImportConflict` preserves cross-batch conflicts for
+inspection without storing raw private values in its diagnostic payload.

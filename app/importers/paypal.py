@@ -27,6 +27,11 @@ from app.domain.paypal import classify_paypal_semantic
 from app.importers.sparda import PrivateProfileRequiredError
 from app.security.redaction import redact_text
 from app.services.import_execution import run_atomic_import
+from app.services.import_identity import (
+    IdentityStatus,
+    SourceIdentityTracker,
+    add_source_conflict,
+)
 
 REQUIRED_COLUMNS = frozenset(
     {
@@ -110,6 +115,11 @@ class PayPalImportSummary:
     source_transactions_created: int = 0
     economic_events_created: int = 0
     duplicate_rows: int = 0
+    duplicate_rows_within_file: int = 0
+    existing_exact_rows: int = 0
+    conflicting_rows: int = 0
+    unique_source_rows: int = 0
+    new_rows: int = 0
     duplicate_files: int = 0
     failed_rows: int = 0
 
@@ -200,6 +210,43 @@ def _fingerprint(values: dict[str, str], occurred_at: datetime, net: Decimal) ->
     }
     payload = json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _natural_key(values: dict[str, str]) -> str:
+    stable = {
+        "transaction_code": values.get("Transaktionscode", "").strip(),
+        "occurred_at": " ".join(
+            value.strip() for value in (values.get("Datum", ""), values.get("Uhrzeit", ""))
+        ),
+        "type": values.get("Typ", "").strip(),
+        "name": values.get("Name", "").strip(),
+        "net": values.get("Netto", "").strip(),
+        "currency": values.get("Währung", "").strip().upper(),
+    }
+    payload = json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(f"paypal|{payload}".encode()).hexdigest()
+
+
+def _apply_identity_summary(
+    summary: PayPalImportSummary, rows: list[PayPalRow], db: Session
+) -> None:
+    tracker = SourceIdentityTracker(db, "paypal", _natural_key)
+    for row in rows:
+        result = tracker.classify(
+            natural_key=_natural_key(row.raw_values),
+            content_hash=row.fingerprint,
+            payload=row.raw_values,
+        )
+        if result.status == IdentityStatus.DUPLICATE_WITHIN_FILE:
+            summary.duplicate_rows_within_file += 1
+        elif result.status == IdentityStatus.EXISTING_EXACT:
+            summary.existing_exact_rows += 1
+        elif result.status == IdentityStatus.EXISTING_CONFLICT:
+            summary.conflicting_rows += 1
+        else:
+            summary.new_rows += 1
+    summary.duplicate_rows = summary.duplicate_rows_within_file + summary.existing_exact_rows
+    summary.unique_source_rows = len(rows) - summary.duplicate_rows_within_file
 
 
 def _group_rows(rows: list[PayPalRow]) -> list[PayPalRow]:
@@ -483,6 +530,7 @@ def preview_paypal_file(
     rows = parse_paypal_csv(path)
     matches = match_sparda_funding(db, rows)
     summary = _summary(rows, matches)
+    _apply_identity_summary(summary, rows, db)
     preview = [
         PayPalPreviewRow(
             row_number=row.row_number,
@@ -505,19 +553,10 @@ def dry_run_paypal_file(path: Path, db: Session) -> PayPalDryRunReport:
     rows = parse_paypal_csv(path)
     matches = match_sparda_funding(db, rows)
     summary = _summary(rows, matches)
+    _apply_identity_summary(summary, rows, db)
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     existing_batch = db.scalar(select(ImportBatch).where(ImportBatch.source_hash == source_hash))
     duplicate_file = existing_batch is not None and existing_batch.status == "imported"
-    fingerprints = {row.fingerprint for row in rows}
-    duplicate_rows = len(
-        set(
-            db.scalars(
-                select(SourceTransaction.fingerprint).where(
-                    SourceTransaction.fingerprint.in_(fingerprints)
-                )
-            )
-        )
-    )
     dates = [row.occurred_at.date() for row in rows]
     return PayPalDryRunReport(
         source_rows=len(rows),
@@ -525,7 +564,7 @@ def dry_run_paypal_file(path: Path, db: Session) -> PayPalDryRunReport:
         date_to=max(dates).isoformat(),
         duplicate_file=duplicate_file,
         existing_batch_status=existing_batch.status if existing_batch else None,
-        duplicate_rows=duplicate_rows,
+        duplicate_rows=summary.duplicate_rows,
         merchant_payments=summary.merchant_payments,
         refunds=summary.refunds,
         technical_funding_rows=summary.technical_funding_rows,
@@ -586,15 +625,34 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
     created_sources: dict[int, SourceTransaction] = {}
     sources_by_code: dict[str, SourceTransaction] = {}
     created_events: dict[int, EconomicEvent] = {}
-    seen: set[str] = set()
+    tracker = SourceIdentityTracker(db, "paypal", _natural_key)
 
     for row in rows:
-        if row.fingerprint in seen or db.scalar(
-            select(SourceTransaction.id).where(SourceTransaction.fingerprint == row.fingerprint)
-        ):
-            summary.duplicate_rows += 1
+        natural_key = _natural_key(row.raw_values)
+        identity = tracker.classify(
+            natural_key=natural_key,
+            content_hash=row.fingerprint,
+            payload=row.raw_values,
+        )
+        if identity.status != IdentityStatus.NEW:
+            if identity.status == IdentityStatus.DUPLICATE_WITHIN_FILE:
+                summary.duplicate_rows_within_file += 1
+                summary.duplicate_rows += 1
+            elif identity.status == IdentityStatus.EXISTING_EXACT:
+                summary.existing_exact_rows += 1
+                summary.duplicate_rows += 1
+            else:
+                summary.conflicting_rows += 1
+                add_source_conflict(
+                    db,
+                    batch,
+                    source_system="paypal",
+                    natural_key=natural_key,
+                    incoming_content_hash=row.fingerprint,
+                    result=identity,
+                )
             continue
-        seen.add(row.fingerprint)
+        summary.new_rows += 1
         decision = classify_paypal_row(row)
         raw = RawImportRecord(
             import_batch_id=batch.id,
@@ -632,6 +690,7 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
                 "technical": decision.is_technical,
             },
             fingerprint=row.fingerprint,
+            source_natural_key=natural_key,
         )
         db.add(source)
         db.flush()
@@ -761,6 +820,7 @@ def _import_rows(db: Session, batch: ImportBatch, path: Path) -> int:
                 )
             )
 
+    summary.unique_source_rows = len(rows) - summary.duplicate_rows_within_file
     batch.metadata_json = {**(batch.metadata_json or {}), "import_summary": summary.as_dict()}
     return len(rows)
 

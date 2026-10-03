@@ -12,6 +12,7 @@ from app.db.base import Base
 from app.db.models import (
     AssignmentRule,
     Category,
+    CategoryAssignmentDecision,
     EconomicEvent,
     Envelope,
     ProjectAssignmentDecision,
@@ -233,6 +234,12 @@ def test_review_only_stores_project_and_category_before_event(db: Session) -> No
     assert event is not None
     assert event.category_id == category.id
     assert event.project_id == project.id
+    category_decision = db.scalar(select(CategoryAssignmentDecision))
+    project_decision = db.scalar(select(ProjectAssignmentDecision))
+    assert category_decision is not None
+    assert project_decision is not None
+    assert category_decision.economic_event_id == event.id
+    assert project_decision.economic_event_id == event.id
 
 
 def test_month_and_project_filtering(db: Session) -> None:

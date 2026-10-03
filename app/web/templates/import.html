@@ -13,7 +13,7 @@
     <article><span>3</span><small>Ereignisse</small><strong>{{ result.economic_events_created }}</strong></article>
     <article><span>4</span><small>Reviews</small><strong>{{ result.review_items }}</strong></article>
   </div>
-  <p>Neue Raw Records {{ result.get('new_raw_records', 0) }} · Transfers {{ result.get('transfers', 0) }} · Ausgaben {{ result.get('expenses', 0) }} · Einnahmen {{ result.get('income', 0) }} · Refunds {{ result.get('refunds', 0) }} · Duplikatzeilen {{ result.get('duplicate_rows', 0) }} · Dateiduplikate {{ 1 if duplicate else result.get('duplicate_files', 0) }} · Fehlzeilen {{ result.get('failed_rows', 0) }}</p>
+  <p>Neue Raw Records {{ result.get('new_raw_records', 0) }} · Transfers {{ result.get('imported_transfers', result.get('transfers', 0)) }} · Ausgaben {{ result.get('imported_expenses', result.get('expenses', 0)) }} · Einnahmen {{ result.get('imported_income', result.get('income', 0)) }} · Refunds {{ result.get('imported_refunds', result.get('refunds', 0)) }} · Duplikatzeilen {{ result.get('duplicate_rows', 0) }} · Dateiduplikate {{ 1 if duplicate else result.get('duplicate_files', 0) }} · Fehlzeilen {{ result.get('failed_rows', 0) }}</p>
 </article>
 {% endif %}
 <article class="panel">

@@ -14,6 +14,10 @@ from app.services.balance_confirmations import backfill_sparda_imported_balance
 from app.services.diagnostics import diagnostics_as_dicts
 from app.services.import_staging import delete_staged_file
 from app.services.private_profile import initialize_private_profile
+from app.services.reconciliation_apply import (
+    apply_reconciliation_writes,
+    plan_reconciliation_writes,
+)
 from app.services.reconciliation_audit import audit_reconciliation
 from app.services.retention import apply_retention, plan_retention
 from app.services.sparda_reclassification import (
@@ -75,6 +79,12 @@ def build_parser() -> argparse.ArgumentParser:
         "audit-reconciliation",
         help="Read-only cross-source reconciliation audit for imported private data",
     )
+    reconcile = commands.add_parser(
+        "reconcile",
+        help="Plan or apply safe high-confidence cross-source reconciliation links",
+    )
+    reconcile.add_argument("--apply", action="store_true")
+    reconcile.add_argument("--confirm", action="store_true")
     return parser
 
 
@@ -184,6 +194,25 @@ def main() -> None:
         with SessionLocal() as db:
             report = audit_reconciliation(db)
         print(json.dumps(report.as_dict(), indent=2, ensure_ascii=True))
+    elif args.command == "reconcile":
+        if settings.demo_mode:
+            raise ValueError("reconcile requires MONEYOS_DEMO_MODE=false")
+        if not args.apply:
+            with SessionLocal() as db:
+                plan = plan_reconciliation_writes(db)
+            print(json.dumps(plan.as_dict(), indent=2, ensure_ascii=True))
+        else:
+            if not args.confirm:
+                raise ValueError("reconcile --apply requires --confirm")
+            backup = create_backup(
+                settings.active_database_url,
+                settings.active_backup_dir,
+                backup_type="safety",
+            )
+            with SessionLocal.begin() as db:
+                result = apply_reconciliation_writes(db)
+            print(f"safety_backup={backup}")
+            print(json.dumps(result.as_dict(), indent=2, ensure_ascii=True))
 
 
 if __name__ == "__main__":

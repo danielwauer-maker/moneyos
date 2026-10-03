@@ -38,6 +38,7 @@ class ReconciliationAuditReport:
     economic_events: int = 0
     amazon_records: int = 0
     existing_cross_source_links: int = 0
+    existing_amex_settlement_links: int = 0
     high_confidence_candidates: int = 0
     medium_confidence_candidates: int = 0
     unresolved_candidates: int = 0
@@ -183,6 +184,20 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
         1
         for link in links
         if link.link_type in {"funding_leg", "settlement_leg", "third_party_payment"}
+    )
+    existing_amex_settlement_links = sum(
+        1
+        for link in links
+        if link.link_type == "settlement_leg"
+        and (
+            source := next(
+                (item for item in sources if item.id == link.source_transaction_id),
+                None,
+            )
+        )
+        is not None
+        and source.source_system == "amex"
+        and (source.metadata_json or {}).get("amex_semantic") == "statement_payment"
     )
 
     # PayPal funding -> Sparda / Amex
@@ -534,6 +549,7 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
         economic_events=len(events),
         amazon_records=len(amazon),
         existing_cross_source_links=existing_cross_source_links,
+        existing_amex_settlement_links=existing_amex_settlement_links,
         amex_statement_payment_rows=amex_statement_payment_rows,
         sparda_amex_settlement_rows=sparda_amex_settlement_rows,
         candidates=candidates,

@@ -245,13 +245,15 @@ def calculate_envelope_targets(
 
     resolved_envelope_by_event: dict[int, int] = {}
     for event in events:
-        if event.id in open_review_event_ids:
-            continue
         decision = assignment_decisions.get(event_keys[event.id])
+        # An explicit envelope decision is independent from category/type/project
+        # reviews and therefore wins even while another review dimension is open.
         if decision and decision.decision == "assigned" and decision.envelope_id is not None:
             resolved_envelope_by_event[event.id] = decision.envelope_id
             continue
         if decision and decision.decision == "no_envelope":
+            continue
+        if event.id in open_review_event_ids:
             continue
         if event.envelope_id is not None:
             resolved_envelope_by_event[event.id] = event.envelope_id

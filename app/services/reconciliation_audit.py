@@ -46,6 +46,9 @@ class ReconciliationAuditReport:
     amazon_payment: int = 0
     amazon_refund: int = 0
     amex_sparda_settlement: int = 0
+    amazon_nm_candidates: int = 0
+    amex_statement_payment_rows: int = 0
+    sparda_amex_settlement_rows: int = 0
     candidates: list[ReconciliationCandidate] | None = None
 
     def as_dict(self) -> dict[str, object]:
@@ -277,6 +280,16 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
                 )
             )
 
+    amex_statement_payment_rows = sum(
+        (source.metadata_json or {}).get("amex_semantic") == "statement_payment"
+        for source in by_system.get("amex", [])
+    )
+    sparda_amex_settlement_rows = sum(
+        (source.metadata_json or {}).get("sparda_semantic")
+        in {"american_express_settlement", "amex_settlement", "card_settlement"}
+        for source in by_system.get("sparda", [])
+    )
+
     # Amex statement payment -> Sparda transfer
     for source in by_system.get("amex", []):
         if (source.metadata_json or {}).get("amex_semantic") != "statement_payment":
@@ -295,7 +308,7 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
                 "american express"
                 in f"{candidate.merchant_raw or ''} {candidate.description_raw}".casefold()
                 or (candidate.metadata_json or {}).get("sparda_semantic")
-                in {"amex_settlement", "card_settlement"}
+                in {"american_express_settlement", "amex_settlement", "card_settlement"}
             )
         ]
         close = [
@@ -366,6 +379,17 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
     for rows in refund_groups.values():
         amazon_groups.append(("refund", rows, abs(rows[0].amount or Decimal("0"))))
 
+    unresolved_amazon_orders: list[tuple[list[AmazonEnrichmentRecord], Decimal, object]] = []
+    unresolved_amazon_events: list[tuple[EconomicEvent, SourceTransaction]] = []
+
+    for event in events:
+        if event.event_type != "expense":
+            continue
+        for source in canonical_sources_by_event.get(event.id, []):
+            if _amazon_source(source):
+                unresolved_amazon_events.append((event, source))
+                break
+
     for match_type, rows, amount in amazon_groups:
         if amount == 0:
             continue
@@ -404,6 +428,8 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
             confidence, score, target_id = "medium", Decimal("0.65"), event.id
         else:
             confidence, score, target_id = "unresolved", Decimal("0"), None
+            if match_type == "payment":
+                unresolved_amazon_orders.append((rows, amount, occurred_at))
 
         duplicate_evidence = len(rows) if match_type == "refund" else 1
         candidates.append(
@@ -426,11 +452,90 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
             )
         )
 
+    # N:M diagnostics for unresolved Amazon orders.
+    # This does not link anything; it only surfaces exact two-part sums.
+    seen_nm: set[tuple[str, int, int]] = set()
+    for rows, amount, occurred_at in unresolved_amazon_orders:
+        nearby_events = [
+            (event, source)
+            for event, source in unresolved_amazon_events
+            if event.currency == (rows[0].currency or event.currency)
+            and _days(event.occurred_at, occurred_at) <= 10
+        ]
+        pair_matches: list[tuple[EconomicEvent, EconomicEvent]] = []
+        for index, (left, _left_source) in enumerate(nearby_events):
+            for right, _right_source in nearby_events[index + 1 :]:
+                if _same_amount(left.amount + right.amount, amount):
+                    pair_matches.append((left, right))
+        if len(pair_matches) == 1:
+            left, right = pair_matches[0]
+            key = ("order_to_two_events", left.id, right.id)
+            if key not in seen_nm:
+                seen_nm.add(key)
+                candidates.append(
+                    _candidate(
+                        kind="amazon_payment_nm",
+                        confidence="medium",
+                        score=Decimal("0.70"),
+                        amount=amount,
+                        occurred_at=occurred_at,
+                        source_id=rows[0].id,
+                        target_id=None,
+                        detail=(
+                            f"Amazon-N:M-Kandidat: Order {amount:.2f} EUR passt exakt "
+                            f"zu zwei Zahlungsereignissen {left.amount:.2f} + "
+                            f"{right.amount:.2f} EUR (Event {left.id} + {right.id})."
+                        ),
+                    )
+                )
+
+    unresolved_order_values = [
+        (rows, amount, occurred_at)
+        for rows, amount, occurred_at in unresolved_amazon_orders
+        if amount > 0
+    ]
+    for index, (left_rows, left_amount, left_at) in enumerate(unresolved_order_values):
+        for right_rows, right_amount, right_at in unresolved_order_values[index + 1 :]:
+            if _days(left_at, right_at) > 3:
+                continue
+            combined = left_amount + right_amount
+            matching_events = [
+                event
+                for event, _source in unresolved_amazon_events
+                if _same_amount(event.amount, combined)
+                and min(_days(event.occurred_at, left_at), _days(event.occurred_at, right_at)) <= 10
+            ]
+            if len(matching_events) != 1:
+                continue
+            event = matching_events[0]
+            key = ("two_orders_to_event", left_rows[0].id, right_rows[0].id)
+            if key in seen_nm:
+                continue
+            seen_nm.add(key)
+            candidates.append(
+                _candidate(
+                    kind="amazon_payment_nm",
+                    confidence="medium",
+                    score=Decimal("0.70"),
+                    amount=combined,
+                    occurred_at=min(left_at, right_at),
+                    source_id=left_rows[0].id,
+                    target_id=event.id,
+                    detail=(
+                        f"Amazon-N:M-Kandidat: zwei Orders {left_amount:.2f} + "
+                        f"{right_amount:.2f} EUR passen exakt zu Event {event.id} "
+                        f"mit {event.amount:.2f} EUR."
+                    ),
+                )
+            )
+
     report = ReconciliationAuditReport(
         source_transactions=len(sources),
         economic_events=len(events),
         amazon_records=len(amazon),
         existing_cross_source_links=existing_cross_source_links,
+        amex_statement_payment_rows=amex_statement_payment_rows,
+        sparda_amex_settlement_rows=sparda_amex_settlement_rows,
         candidates=candidates,
     )
     for candidate in candidates:
@@ -451,5 +556,7 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
             report.amazon_refund += 1
         elif candidate.kind == "amex_sparda_settlement":
             report.amex_sparda_settlement += 1
+        elif candidate.kind == "amazon_payment_nm":
+            report.amazon_nm_candidates += 1
 
     return report

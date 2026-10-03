@@ -15,9 +15,6 @@ from app.db.models import (
     ImportBatch,
     Project,
     RawImportRecord,
-    ReviewItem,
-    SourceTransaction,
-    SourceTransactionAccount,
 )
 from app.db.session import get_db
 from app.importers.amazon import (

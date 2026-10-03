@@ -517,9 +517,7 @@ def test_transaction_page_rejects_invalid_date_filters(db: Session) -> None:
     try:
         with TestClient(app) as client:
             invalid = client.get("/transactions?date_from=not-a-date")
-            reversed_range = client.get(
-                "/transactions?date_from=2026-10-31&date_to=2026-10-01"
-            )
+            reversed_range = client.get("/transactions?date_from=2026-10-31&date_to=2026-10-01")
     finally:
         app.dependency_overrides.clear()
 

@@ -4,8 +4,17 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from app.db.models import RawImportRecord, ReviewItem
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+
+from app.db.models import (
+    RawImportRecord,
+    ReviewItem,
+    SourceTransaction,
+    SourceTransactionAccount,
+)
 from app.services.transaction_details import derive_transaction_detail
+from app.services.transaction_review import build_transaction_review
 
 TYPE_LABELS = {
     "expense": "Ausgabe",
@@ -68,3 +77,41 @@ def build_review_view(review: ReviewItem, raw: RawImportRecord | None = None) ->
         proposed_envelope=(review.proposed_envelope.name if review.proposed_envelope else "Keiner"),
         proposed_project=(review.proposed_project.name if review.proposed_project else "Keines"),
     )
+
+
+def actionable_open_reviews(db: Session) -> list[ReviewItem]:
+    """Return open review items that still require a user decision.
+
+    Historical ReviewItems can remain open after all explicit transaction-review
+    dimensions were confirmed, for example after a bulk assignment import. Those
+    rows must not keep the inbox or its badge open. Event-only reviews remain
+    actionable until their own status changes.
+    """
+    rows, _ = build_transaction_review(db)
+    fully_reviewed_source_ids = {row.source.id for row in rows if row.fully_reviewed}
+    reviews = list(
+        db.scalars(
+            select(ReviewItem)
+            .where(ReviewItem.status == "open")
+            .options(
+                selectinload(ReviewItem.economic_event),
+                selectinload(ReviewItem.proposed_category),
+                selectinload(ReviewItem.proposed_envelope),
+                selectinload(ReviewItem.proposed_project),
+                selectinload(ReviewItem.source_transaction)
+                .selectinload(SourceTransaction.account_links)
+                .selectinload(SourceTransactionAccount.account),
+            )
+            .order_by(ReviewItem.id)
+        )
+    )
+    return [
+        review
+        for review in reviews
+        if review.source_transaction_id is None
+        or review.source_transaction_id not in fully_reviewed_source_ids
+    ]
+
+
+def actionable_open_review_count(db: Session) -> int:
+    return len(actionable_open_reviews(db))

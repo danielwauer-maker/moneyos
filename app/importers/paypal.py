@@ -291,7 +291,13 @@ def parse_paypal_csv(path: Path) -> list[PayPalRow]:
     if dialect.delimiter not in {";", ","}:
         raise PayPalFormatError("unsupported_delimiter", "CSV-Trennzeichen nicht unterstützt.")
     physical_lines = text.splitlines(keepends=True)
-    reader = csv.reader(io.StringIO(text, newline=""), dialect=dialect, strict=True)
+    reader = csv.reader(
+        io.StringIO(text, newline=""),
+        delimiter=dialect.delimiter,
+        quotechar='"',
+        doublequote=True,
+        strict=True,
+    )
     try:
         original_header = next(reader)
     except (StopIteration, csv.Error) as exc:

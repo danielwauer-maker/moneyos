@@ -67,7 +67,7 @@ from app.services.import_staging import (
     is_batch_previewable,
     stage_upload,
 )
-from app.services.reviews import actionable_review_items, build_review_view
+from app.services.reviews import actionable_review_count, actionable_review_items, build_review_view
 from app.services.transaction_details import event_transaction_views
 from app.services.transaction_review import (
     apply_transaction_decision,
@@ -80,8 +80,16 @@ router = APIRouter()
 DbSession = Annotated[Session, Depends(get_db)]
 
 
-def render(request: Request, template: str, **context: object) -> HTMLResponse:
+def render(
+    request: Request,
+    template: str,
+    *,
+    db: Session | None = None,
+    **context: object,
+) -> HTMLResponse:
     settings = get_settings()
+    if db is not None and "open_reviews" not in context:
+        context["open_reviews"] = actionable_review_count(db)
     return templates.TemplateResponse(
         request,
         template,
@@ -97,7 +105,7 @@ def render(request: Request, template: str, **context: object) -> HTMLResponse:
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: DbSession) -> HTMLResponse:
     return render(
-        request, "dashboard.html", active="dashboard", page_title="Übersicht", **build_dashboard(db)
+        request, "dashboard.html", db=db, active="dashboard", page_title="Übersicht", **build_dashboard(db)
     )
 
 
@@ -176,6 +184,7 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "transactions.html",
+        db=db,
         active="transactions",
         page_title="Transaktionen",
         transaction_views=views,
@@ -192,7 +201,7 @@ def transactions(request: Request, db: DbSession) -> HTMLResponse:
 def envelopes(request: Request, db: DbSession) -> HTMLResponse:
     data = build_dashboard(db)
     data["assignment_progress"] = build_assignment_workspace(db).progress
-    return render(request, "envelopes.html", active="envelopes", page_title="Umschläge", **data)
+    return render(request, "envelopes.html", db=db, active="envelopes", page_title="Umschläge", **data)
 
 
 @router.get("/envelope-assignments", response_class=HTMLResponse)
@@ -227,6 +236,7 @@ def envelope_assignments(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "envelope_assignments.html",
+        db=db,
         active="envelope_assignment",
         page_title="Umschlag-Zuordnung",
         workspace=workspace,
@@ -371,6 +381,7 @@ def accounts(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "accounts.html",
+        db=db,
         active="accounts",
         page_title="Konten",
         accounts=account_balance_views(db),
@@ -404,6 +415,7 @@ def confirm_account_balance(request: Request, account_id: int, db: DbSession) ->
     return render(
         request,
         "account_confirmation.html",
+        db=db,
         active="accounts",
         page_title="Saldo bestätigen",
         **_confirmation_context(account, db),
@@ -451,6 +463,7 @@ def save_account_balance(
         response = render(
             request,
             "account_confirmation.html",
+            db=db,
             active="accounts",
             page_title="Saldo bestätigen",
             error=str(exc),
@@ -462,10 +475,11 @@ def save_account_balance(
 
 
 @router.get("/planning", response_class=HTMLResponse)
-def planning(request: Request) -> HTMLResponse:
+def planning(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "placeholder.html",
+        db=db,
         active="planning",
         page_title="Planung",
         section="Liquiditätsplanung",
@@ -510,6 +524,7 @@ def projects(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "projects.html",
+        db=db,
         active="projects",
         page_title="Projekte",
         projects=rows,
@@ -579,6 +594,7 @@ def transaction_review(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "transaction_review.html",
+        db=db,
         active="transaction_review",
         page_title="Transaktionsprüfung",
         rows=rows,
@@ -734,6 +750,7 @@ def categories(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "categories.html",
+        db=db,
         active="categories",
         page_title="Kategorien",
         category_groups=category_groups(db),
@@ -807,6 +824,7 @@ def review(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "review.html",
+        db=db,
         active="review",
         page_title="Prüfen",
         reviews=[
@@ -841,6 +859,7 @@ def imports(
     return render(
         request,
         "import.html",
+        db=db,
         active="import",
         page_title="Import",
         batches=batches,
@@ -891,6 +910,7 @@ def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
         return render(
             request,
             "amazon_preview.html",
+            db=db,
             active="import",
             page_title="Amazon-Enrichment-Vorschau",
             batch=batch,
@@ -906,6 +926,7 @@ def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
         return render(
             request,
             "amex_preview.html",
+            db=db,
             active="import",
             page_title="American-Express-Vorschau",
             batch=batch,
@@ -921,6 +942,7 @@ def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
         return render(
             request,
             "paypal_preview.html",
+            db=db,
             active="import",
             page_title="PayPal-Vorschau",
             batch=batch,
@@ -935,6 +957,7 @@ def preview_import(request: Request, batch_id: int, db: DbSession) -> HTMLRespon
     return render(
         request,
         "sparda_preview.html",
+        db=db,
         active="import",
         page_title="Sparda-Vorschau",
         batch=batch,
@@ -982,6 +1005,7 @@ def diagnostics(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "diagnostics.html",
+        db=db,
         active="settings",
         page_title="Diagnose",
         checks=run_diagnostics(db, get_settings()),
@@ -989,10 +1013,11 @@ def diagnostics(request: Request, db: DbSession) -> HTMLResponse:
 
 
 @router.get("/settings", response_class=HTMLResponse)
-def settings(request: Request) -> HTMLResponse:
+def settings(request: Request, db: DbSession) -> HTMLResponse:
     return render(
         request,
         "placeholder.html",
+        db=db,
         active="settings",
         page_title="Einstellungen",
         section="Lokale Einstellungen",

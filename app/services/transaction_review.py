@@ -606,6 +606,29 @@ def apply_transaction_decision(
                 record.decided_at = now if project_decision != "later" else None
             if event:
                 event.project_id = project_id if project_decision == "assigned" else None
+
+    # Keep the exception inbox aligned with the explicit four-dimensional review state.
+    # Historical/bulk decisions may fully resolve a transaction while its original
+    # ReviewItem still says `open`. Once the row is fully reviewed, close those
+    # source-level review items as part of the same transaction.
+    db.flush()
+    refreshed_rows, _ = build_transaction_review(db)
+    refreshed_by_key = {row.key: row for row in refreshed_rows}
+    resolved_source_ids = [
+        refreshed_by_key[row.key].source.id
+        for row in selected
+        if row.key in refreshed_by_key and refreshed_by_key[row.key].fully_reviewed
+    ]
+    if resolved_source_ids:
+        for review in db.scalars(
+            select(ReviewItem).where(
+                ReviewItem.source_transaction_id.in_(resolved_source_ids),
+                ReviewItem.status == "open",
+            )
+        ):
+            review.status = "resolved"
+            review.decided_at = now
+            review.decision_notes = "Durch vollständige Transaktionsprüfung aufgelöst"
     return len(selected)
 
 

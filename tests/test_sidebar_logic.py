@@ -17,6 +17,7 @@ from app.db.models import (
     Category,
     EconomicEvent,
     Envelope,
+    EnvelopeSnapshot,
     EventSourceLink,
     Project,
     ReviewItem,
@@ -25,6 +26,7 @@ from app.db.models import (
 from app.db.session import get_db
 from app.main import app
 from app.services.dashboard import build_dashboard
+from app.services.envelope_targets import calculate_envelope_targets
 from app.services.reviews import actionable_review_count
 from app.services.transaction_review import apply_transaction_decision
 
@@ -417,3 +419,51 @@ def test_category_page_labels_pending_counts_as_source_decisions(db: Session) ->
     assert page.status_code == 200
     assert "Quellentscheidungen ohne Ereignis" in page.text
     assert "offene Review-Entscheidungen" not in page.text
+
+
+def test_envelope_targets_handles_open_review_rows(db: Session) -> None:
+    envelope = Envelope(name="Haushalt", is_active=True, sort_order=1)
+    db.add(envelope)
+    db.flush()
+    db.add(
+        EnvelopeSnapshot(
+            envelope_id=envelope.id,
+            snapshot_date=date(2026, 9, 1),
+            physical_balance=D("100"),
+            source="confirmed_private_baseline",
+            is_confirmed=True,
+        )
+    )
+    source = SourceTransaction(
+        source_system="synthetic",
+        source_transaction_id="open-review-envelope-target",
+        booked_at=datetime(2026, 9, 15, 12),
+        merchant_raw="Test Merchant",
+        description_raw="Offener Prüffall",
+        amount=D("-20"),
+        fingerprint="open-review-envelope-target".ljust(64, "0"),
+    )
+    db.add(source)
+    db.flush()
+    db.add(
+        ReviewItem(
+            source_transaction_id=source.id,
+            review_type="economic_type",
+            proposed_event_type="expense",
+            proposed_envelope_id=envelope.id,
+            confidence=D("0.5"),
+            explanation="Regression für Envelope-Target-Reviewabfrage",
+            status="open",
+        )
+    )
+    db.commit()
+
+    result = calculate_envelope_targets(
+        db,
+        calculation_date=date(2026, 10, 3),
+        free_vault_cash=D("0"),
+    )
+
+    assert result.unresolved_count == 1
+    assert result.rows[0].unresolved_count == 1
+    assert result.rows[0].status == "partial"

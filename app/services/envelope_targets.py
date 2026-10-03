@@ -14,6 +14,7 @@ from app.db.models import (
     EnvelopeMovement,
     EnvelopeSnapshot,
     EventSourceLink,
+    ReviewItem,
     SourceTransaction,
 )
 from app.domain.envelopes import physical_balance

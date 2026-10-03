@@ -95,7 +95,9 @@ docker compose up --build
 SQLite-Daten, typische Finanzexportformate, Import-/Exportverzeichnisse, Logs,
 `.env` und private Quelldaten sind per `.gitignore` ausgeschlossen. Demo-Daten
 sind vollständig fiktiv. Docker veröffentlicht Port 8000 ausschließlich auf
-`127.0.0.1`.
+`127.0.0.1`. Alembic-Migrationen werden ausschließlich im FastAPI-Lifespan beim
+Anwendungsstart ausgeführt; Docker-/Compose-Kommandos starten daher keine zweite
+`alembic upgrade head`-Ausführung.
 
 ## Architektur und Regeln
 

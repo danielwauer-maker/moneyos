@@ -4,59 +4,87 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import (
-    EconomicEvent,
-    RecurringItem,
-    ReviewItem,
-)
-from app.domain.accounting import WealthInputs, total_wealth
+from app.db.models import EconomicEvent, RecurringItem
 from app.services.balance_confirmations import account_balance_views, vault_free_cash
 from app.services.envelope_targets import calculate_envelope_targets
+from app.services.reviews import actionable_review_count
 from app.services.transaction_details import event_transaction_views
 
 
-def build_dashboard(session: Session) -> dict[str, object]:
+def build_dashboard(session: Session, *, calculation_date: date | None = None) -> dict[str, object]:
+    today = calculation_date or date.today()
     account_rows = account_balance_views(session, include_inactive=False)
-    by_type = {row.account.account_type: row for row in account_rows}
+    confirmed_rows = [row for row in account_rows if row.current is not None]
 
-    def confirmed_balance(account_type: str) -> Decimal:
-        row = by_type.get(account_type)
-        return row.current.balance if row and row.current else Decimal()
-
-    wealth = total_wealth(
-        WealthInputs(
-            checking=confirmed_balance("checking"),
-            paypal=confirmed_balance("paypal"),
-            wallet=confirmed_balance("cash_wallet"),
-            vault=confirmed_balance("cash_vault"),
-            credit_card_liabilities=(abs(confirmed_balance("credit_card"))),
-        )
+    asset_total = sum(
+        (row.current.balance for row in confirmed_rows if not row.account.is_liability),
+        Decimal(),
     )
-    vault = by_type.get("cash_vault")
-    vault_balance_confirmed = bool(vault and vault.current)
-    confirmed_free_vault = vault_free_cash(vault.current) if vault else None
-    free_vault = max(confirmed_free_vault or Decimal(), Decimal())
+    liability_total = sum(
+        (abs(row.current.balance) for row in confirmed_rows if row.account.is_liability),
+        Decimal(),
+    )
+    wealth = asset_total - liability_total
+
+    vault_rows = [row for row in account_rows if row.account.account_type == "cash_vault"]
+    vault_balance_confirmed = bool(vault_rows) and all(row.current is not None for row in vault_rows)
+    free_vault = sum(
+        (max(vault_free_cash(row.current) or Decimal(), Decimal()) for row in vault_rows),
+        Decimal(),
+    )
+
     envelope_targets = calculate_envelope_targets(
         session,
-        calculation_date=date.today(),
+        calculation_date=today,
         free_vault_cash=free_vault,
     )
     envelope_rows = envelope_targets.rows
     reserved = sum((row.actual for row in envelope_rows), Decimal())
-    month_start = date.today().replace(day=1)
-    income = session.scalar(
-        select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
-            EconomicEvent.event_type == "income", EconomicEvent.occurred_at >= month_start
-        )
+
+    liquid_types = {"checking", "paypal", "cash_wallet"}
+    liquidity_rows = [
+        row
+        for row in account_rows
+        if (not row.account.is_liability and row.account.account_type in liquid_types)
+        or row.account.account_type == "cash_vault"
+        or row.account.is_liability
+    ]
+    liquidity_complete = all(row.current is not None for row in liquidity_rows)
+    liquid_assets = sum(
+        (
+            row.current.balance
+            for row in confirmed_rows
+            if not row.account.is_liability and row.account.account_type in liquid_types
+        ),
+        Decimal(),
     )
-    expenses = session.scalar(
-        select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
-            EconomicEvent.event_type == "expense", EconomicEvent.occurred_at >= month_start
-        )
+    free_available = (
+        liquid_assets + free_vault - liability_total if liquidity_complete else None
     )
-    open_reviews = session.scalar(
-        select(func.count()).select_from(ReviewItem).where(ReviewItem.status == "open")
+
+    month_start = today.replace(day=1)
+    next_month = (
+        date(today.year + 1, 1, 1)
+        if today.month == 12
+        else date(today.year, today.month + 1, 1)
     )
+
+    def month_total(event_type: str) -> Decimal:
+        return session.scalar(
+            select(func.coalesce(func.sum(EconomicEvent.amount), 0)).where(
+                EconomicEvent.event_type == event_type,
+                EconomicEvent.occurred_at >= month_start,
+                EconomicEvent.occurred_at < next_month,
+                EconomicEvent.status.in_(("booked", "confirmed")),
+            )
+        ) or Decimal()
+
+    income = month_total("income")
+    expenses = month_total("expense")
+    refunds = month_total("refund")
+    cashflow = income + refunds - expenses
+    open_reviews = actionable_review_count(session)
+
     recent_events = list(
         session.scalars(
             select(EconomicEvent)
@@ -68,6 +96,7 @@ def build_dashboard(session: Session) -> dict[str, object]:
                 selectinload(EconomicEvent.envelope),
                 selectinload(EconomicEvent.project),
             )
+            .where(EconomicEvent.status.in_(("booked", "confirmed")))
             .order_by(EconomicEvent.occurred_at.desc())
             .limit(6)
         )
@@ -86,19 +115,14 @@ def build_dashboard(session: Session) -> dict[str, object]:
         "wealth_has_unknown": any(row.current is None for row in account_rows),
         "unreconciled_active_count": sum(row.current is None for row in account_rows),
         "reserved": reserved,
-        "free_available": (
-            by_type["checking"].current.balance - expenses
-            if by_type.get("checking") and by_type["checking"].current
-            else None
-        ),
-        "card_liabilities": (
-            abs(by_type["credit_card"].current.balance)
-            if by_type.get("credit_card") and by_type["credit_card"].current
-            else None
-        ),
+        "free_available": free_available,
+        "card_liabilities": liability_total if all(
+            row.current is not None for row in account_rows if row.account.is_liability
+        ) else None,
         "income": income,
         "expenses": expenses,
-        "cashflow": income - expenses,
+        "refunds": refunds,
+        "cashflow": cashflow,
         "open_reviews": open_reviews,
         "envelopes": envelope_rows,
         "free_vault": free_vault,

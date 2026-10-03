@@ -477,3 +477,33 @@ def test_dedicated_workspace_and_quick_action(db: Session, monkeypatch: pytest.M
     assert "Synthetischer Händler" in page.text
     assert saved.status_code == 303
     assert saved.headers["location"].endswith("#workspace")
+
+
+def test_explicit_envelope_decision_counts_even_if_other_review_dimension_is_open(
+    db: Session,
+) -> None:
+    envelope = _envelope(db)
+    source, event = _transaction(db, "explicit-envelope-open-review", amount="25")
+    db.add(
+        ReviewItem(
+            source_transaction_id=source.id,
+            economic_event_id=event.id,
+            review_type="classification",
+            proposed_event_type="expense",
+            confidence=D("0.5"),
+            explanation="Kategorie oder Typ benötigt noch Prüfung",
+            status="open",
+        )
+    )
+    apply_assignment_decisions(
+        db,
+        keys=[_key(source)],
+        decision="assigned",
+        envelope_id=envelope.id,
+    )
+    db.flush()
+
+    row = _target(db).rows[0]
+
+    assert row.expenses == D("25")
+    assert row.accounting_target == D("75")

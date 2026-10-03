@@ -174,9 +174,7 @@ def test_amazon_split_group_matches_single_amex_event(tmp_path: Path) -> None:
             report = audit_reconciliation(db)
 
         matches = [
-            candidate
-            for candidate in report.candidates or []
-            if candidate.kind == "amazon_payment"
+            candidate for candidate in report.candidates or [] if candidate.kind == "amazon_payment"
         ]
         assert len(matches) == 1
         assert matches[0].confidence == "high"

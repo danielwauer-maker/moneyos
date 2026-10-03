@@ -91,6 +91,7 @@ def test_amex_settlement_diagnostics_accept_sparda_semantic(tmp_path: Path) -> N
         ]
         assert report.amex_statement_payment_rows == 1
         assert report.sparda_amex_settlement_rows == 1
+        assert report.existing_amex_settlement_links == 0
         assert len(matches) == 1
         assert matches[0].confidence == "high"
     finally:
@@ -183,5 +184,49 @@ def test_amazon_nm_order_matches_two_payment_events(tmp_path: Path) -> None:
         assert len(matches) == 1
         assert matches[0].confidence == "medium"
         assert matches[0].amount == "30.00"
+    finally:
+        engine.dispose()
+
+
+def test_existing_amex_settlement_link_is_reported(tmp_path: Path) -> None:
+    factory, engine = _factory(tmp_path)
+    try:
+        with factory.begin() as db:
+            event = EconomicEvent(
+                event_type="transfer",
+                occurred_at=datetime(2026, 9, 15),
+                description="American-Express-Abrechnung",
+                amount=D("500.00"),
+                currency="EUR",
+                status="booked",
+                confidence=D("0.99"),
+            )
+            db.add(event)
+            db.flush()
+            amex = _source(
+                "amex",
+                "amex-existing-settlement",
+                "-500.00",
+                datetime(2026, 9, 15),
+                merchant="PAYMENT RECEIVED",
+                metadata={"amex_semantic": "statement_payment"},
+            )
+            db.add(amex)
+            db.flush()
+            db.add(
+                EventSourceLink(
+                    economic_event_id=event.id,
+                    source_transaction_id=amex.id,
+                    link_type="settlement_leg",
+                    confidence=D("0.99"),
+                )
+            )
+
+        with factory() as db:
+            report = audit_reconciliation(db)
+
+        assert report.amex_statement_payment_rows == 1
+        assert report.existing_amex_settlement_links == 1
+        assert report.amex_sparda_settlement == 0
     finally:
         engine.dispose()

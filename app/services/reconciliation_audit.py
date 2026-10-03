@@ -400,7 +400,7 @@ def audit_reconciliation(db: Session) -> ReconciliationAuditReport:
                 confidence, score = "medium", Decimal("0.75")
             target_id = event.id
         elif matches and len(matches) > 1 and matches[0][2] < matches[1][2]:
-            event, _source, _days = matches[0]
+            event, _source, match_days = matches[0]
             confidence, score, target_id = "medium", Decimal("0.65"), event.id
         else:
             confidence, score, target_id = "unresolved", Decimal("0"), None

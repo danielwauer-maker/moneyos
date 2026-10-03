@@ -18,7 +18,7 @@
     </div>
     {% for child_row in group.children %}{% set child = child_row.category %}
       <div class="tree-child">
-        <div><strong>{{ child.name }}</strong> {% if child.is_active %}<span class="badge success">Aktiv</span>{% else %}<span class="badge neutral">Inaktiv</span>{% endif %}<br><small>{{ child_row.event_count }} Ereignisse · {{ child_row.pending_decision_count }} offene Review-Entscheidungen</small></div>
+        <div><strong>{{ child.name }}</strong> {% if child.is_active %}<span class="badge success">Aktiv</span>{% else %}<span class="badge neutral">Inaktiv</span>{% endif %}<br><small>{{ child_row.event_count }} Ereignisse · {{ child_row.pending_decision_count }} Quellentscheidungen ohne Ereignis</small></div>
         <form action="/categories/{{ child.id }}/rename" method="post" class="upload-form"><label><span class="visually-hidden">{{ child.name }} umbenennen</span><input type="text" name="name" value="{{ child.name }}" maxlength="100" required></label><button class="text-button" type="submit">Umbenennen</button></form>
         <form action="/categories/{{ child.id }}/status" method="post"><input type="hidden" name="active" value="{{ 'false' if child.is_active else 'true' }}"><button class="text-button" type="submit">{{ 'Deaktivieren' if child.is_active else 'Reaktivieren' }}</button></form>
       </div>

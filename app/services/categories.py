@@ -4,10 +4,10 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Category, CategoryAssignmentDecision, EconomicEvent
+from app.db.models import Category, CategoryAssignmentDecision, EconomicEvent, EventSourceLink
 
 OPTIMIZED_CATEGORY_HIERARCHY: dict[str, tuple[str, ...]] = {
     "Einnahmen": (
@@ -302,7 +302,18 @@ def category_groups(db: Session) -> tuple[CategoryGroup, ...]:
                 CategoryAssignmentDecision.category_id,
                 func.count(CategoryAssignmentDecision.id),
             )
-            .where(CategoryAssignmentDecision.economic_event_id.is_(None))
+            .outerjoin(
+                EventSourceLink,
+                and_(
+                    EventSourceLink.source_transaction_id
+                    == CategoryAssignmentDecision.source_transaction_id,
+                    EventSourceLink.link_type == "canonical_source",
+                ),
+            )
+            .where(
+                CategoryAssignmentDecision.economic_event_id.is_(None),
+                EventSourceLink.id.is_(None),
+            )
             .group_by(CategoryAssignmentDecision.category_id)
         ).all()
     )

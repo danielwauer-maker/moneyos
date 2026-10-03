@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="intro"><div><h2>Guten Morgen</h2><p>Hier ist dein finanzieller Überblick für heute.</p></div><span class="date-pill">Stand: heute</span></div>
+<div class="intro"><div><h2>Finanzüberblick</h2><p>Bestätigte Kontosalden, wirtschaftliche Ereignisse und physische Umschläge.</p></div><span class="date-pill">Stand: heute</span></div>
 <div class="kpi-grid">
   <article class="kpi featured"><span>Gesamtvermögen{% if wealth_has_unknown %} teilweise{% endif %}</span><strong>{{ wealth|euro }}</strong><small>{% if wealth_has_unknown %}{{ unreconciled_active_count }} Konten noch nicht abgestimmt{% else %}Umschläge im Tresor nur einmal gezählt{% endif %}</small></article>
-  <article class="kpi"><span>Frei verfügbar</span><strong>{{ free_available|euro if free_available is not none else 'Nicht abgestimmt' }}</strong><small>Liquidität nach Monatsausgaben</small></article>
+  <article class="kpi"><span>Giro verfügbar</span><strong>{{ free_available|euro if free_available is not none else 'Nicht abgestimmt' }}</strong><small>Bestätigter aktueller Giro-Saldo; Ausgaben nicht doppelt abgezogen</small></article>
   <article class="kpi"><span>Umschläge / reserviert</span><strong>{{ reserved|euro }}</strong><small>Physisch im Tresor enthalten</small></article>
   <article class="kpi negative"><span>Kartenverbindlichkeiten</span><strong>{{ card_liabilities|euro if card_liabilities is not none else 'Nicht abgestimmt' }}</strong><small>Kreditkartenkonto</small></article>
-  <article class="kpi"><span>Cashflow aktueller Monat</span><strong class="{% if cashflow < 0 %}red{% else %}green{% endif %}">{{ cashflow|euro }}</strong><small>{{ income|euro }} rein · {{ expenses|euro }} raus</small></article>
+  <article class="kpi"><span>Cashflow aktueller Monat</span><strong class="{% if cashflow < 0 %}red{% else %}green{% endif %}">{{ cashflow|euro }}</strong><small>{{ income|euro }} Einnahmen + {{ refunds|euro }} Refunds − {{ expenses|euro }} Ausgaben</small></article>
   <article class="kpi"><span>Transfer-Geld</span><strong>{{ reconciliation.transfer_money|euro }}</strong><small>Interne Umschlag-Umverteilung</small></article>
   <article class="kpi warning"><span>Abhebung nötig</span><strong>{{ reconciliation.bank_withdrawal_needed|euro }}</strong><small>Nach freiem Tresorgeld</small></article>
 </div>
@@ -24,13 +24,14 @@
 <div class="two-col">
   <article class="panel">
     <div class="panel-head"><div><h3>Einnahmen vs. Ausgaben</h3><p>Aktueller Monat</p></div><span class="badge neutral">Live aus SQLite</span></div>
-    {% set total = income + expenses %}
+    {% set total = income + expenses + refunds %}
     <div class="bar-row"><span>Einnahmen</span><div class="bar"><i class="income" style="width: {{ (income / total * 100) if total else 0 }}%"></i></div><strong>{{ income|euro }}</strong></div>
+    <div class="bar-row"><span>Refunds</span><div class="bar"><i class="income" style="width: {{ (refunds / total * 100) if total else 0 }}%"></i></div><strong>{{ refunds|euro }}</strong></div>
     <div class="bar-row"><span>Ausgaben</span><div class="bar"><i class="expense" style="width: {{ (expenses / total * 100) if total else 0 }}%"></i></div><strong>{{ expenses|euro }}</strong></div>
   </article>
   <article class="panel forecast">
-    <div class="panel-head"><div><h3>Liquiditätsprognose</h3><p>Nächste 8 Wochen</p></div><a href="/planning">Details →</a></div>
-    <div class="chart-placeholder"><span>6.200 €</span><svg viewBox="0 0 540 110" preserveAspectRatio="none"><path d="M0 85 C65 75,85 34,145 48 S245 92,305 54 S400 32,540 18" fill="none" stroke="#0f766e" stroke-width="4"/><path d="M0 85 C65 75,85 34,145 48 S245 92,305 54 S400 32,540 18 L540 110 L0 110Z" fill="url(#g)"/><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#14b8a6" stop-opacity=".2"/><stop offset="1" stop-color="#14b8a6" stop-opacity="0"/></linearGradient></defs></svg></div>
+    <div class="panel-head"><div><h3>Liquiditätsprognose</h3><p>Nächste 8 Wochen</p></div><a href="/planning">Status →</a></div>
+    <div class="notice"><strong>Noch nicht produktiv berechnet.</strong><br>MoneyOS zeigt hier bewusst keinen erfundenen Forecast. {% if recurring %}{{ recurring|length }} aktive wiederkehrende Einträge sind bereits als Planungsbasis vorhanden.{% else %}Noch keine wiederkehrenden Einträge als Planungsbasis vorhanden.{% endif %}</div>
   </article>
 </div>
 

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.main import app
 from app.db.base import Base
 from app.db.models import (
     Account,
@@ -24,7 +25,6 @@ from app.db.models import (
     SourceTransaction,
 )
 from app.db.session import get_db
-from app.main import app
 from app.services.categories import category_groups
 from app.services.dashboard import build_dashboard
 from app.services.envelope_targets import calculate_envelope_targets

@@ -153,9 +153,7 @@ def _unsafe_reason(db: Session, candidate: ReconciliationCandidate) -> str:
             return "Ziel-Economic-Event existiert nicht."
         expected = "refund" if candidate.kind == "amazon_refund" else "expense"
         if event.event_type != expected:
-            return (
-                f"Ziel-Economic-Event hat Typ {event.event_type!r} statt erwartet {expected!r}."
-            )
+            return f"Ziel-Economic-Event hat Typ {event.event_type!r} statt erwartet {expected!r}."
         return "Amazon-Kandidat wurde durch eine unbekannte Sicherheitsbedingung verworfen."
 
     return "High-Confidence-Kandidat ist fuer Apply V1 nicht freigegeben."

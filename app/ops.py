@@ -14,11 +14,9 @@ from app.services.balance_confirmations import backfill_sparda_imported_balance
 from app.services.diagnostics import diagnostics_as_dicts
 from app.services.import_staging import delete_staged_file
 from app.services.private_profile import initialize_private_profile
-from app.services.reconciliation_apply import (
-    apply_reconciliation_writes,
-    plan_reconciliation_writes,
-)
+from app.services.reconciliation_apply import apply_reconciliation_writes
 from app.services.reconciliation_audit import audit_reconciliation
+from app.services.reconciliation_plan_report import reconciliation_plan_report
 from app.services.retention import apply_retention, plan_retention
 from app.services.sparda_reclassification import (
     apply_sparda_reclassification,
@@ -199,8 +197,8 @@ def main() -> None:
             raise ValueError("reconcile requires MONEYOS_DEMO_MODE=false")
         if not args.apply:
             with SessionLocal() as db:
-                plan = plan_reconciliation_writes(db)
-            print(json.dumps(plan.as_dict(), indent=2, ensure_ascii=True))
+                report = reconciliation_plan_report(db)
+            print(json.dumps(report, indent=2, ensure_ascii=True))
         else:
             if not args.confirm:
                 raise ValueError("reconcile --apply requires --confirm")
